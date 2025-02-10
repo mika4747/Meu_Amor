@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nosso Amor</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            text-align: center;
+            background-color: #0d0d0d; /* Fundo preto */
+            color: #d6336c;
+            margin: 0;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+            animation: fadeIn 2s ease-out;
+        }
+        
+        @keyframes fadeIn {
+            0% { opacity: 0; }
+            100% { opacity: 1; }
+        }
+
+        h1 {
+            font-family: 'Georgia', serif;
+            font-size: 3em;
+            color: #f8c3d7;
+            text-shadow: 2px 2px 10px rgba(0, 0, 0, 0.3);
+            margin-top: 20px;
+        }
+
+        p {
+            font-size: 1.5em;
+            font-family: 'Verdana', sans-serif;
+            color: #ff69b4;
+            margin-top: 10px;
+        }
+
+        #contador {
+            font-size: 2em;
+            font-weight: bold;
+            margin-top: 20px;
+            color: #ff1493;
+        }
+
+        .image-container {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-top: 30px;
+        }
+
+        .image-container img {
+            width: 100%;
+            max-width: 300px;
+            border-radius: 15px;
+            transition: transform 0.5s ease-in-out;
+            border: 5px solid #f8c3d7;
+            margin-bottom: 20px;
+        }
+
+        .image-container img:hover {
+            transform: scale(1.1) rotateY(180deg);
+        }
+
+        .star {
+            position: absolute;
+            width: 5px;
+            height: 5px;
+            background-color: white;
+            border-radius: 50%;
+            opacity: 0.8;
+            animation: twinkle 2s infinite ease-in-out;
+        }
+
+        @keyframes twinkle {
+            0% { opacity: 0.8; transform: scale(1); }
+            50% { opacity: 0.3; transform: scale(1.2); }
+            100% { opacity: 0.8; transform: scale(1); }
+        }
+
+        audio {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        /* Responsividade */
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2.2em;
+            }
+
+            p {
+                font-size: 1.2em;
+            }
+
+            #contador {
+                font-size: 1.5em;
+            }
+
+            .image-container {
+                flex-direction: column;
+            }
+
+            .image-container img {
+                max-width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Nosso Amor 💖</h1>
+    <p>Desde que começamos a namorar...</p>
+
+    <!-- Áudio MP3 (James TW - Easy) -->
+    <audio autoplay loop>
+        <source src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" type="audio/mp3">
+        Seu navegador não suporta a tag de áudio.
+    </audio>
+
+    <div id="contador"></div>
+    <div class="image-container">
+        <img src="https://imgur.com/be8MaQi.jpg" alt="Foto 1">
+        <img src="https://imgur.com/LtIlrKg.jpg" alt="Foto 2">
+        <img src="https://imgur.com/iM4UWj6.jpg" alt="Foto 3">
+        <img src="https://imgur.com/IlguAtQ.jpg" alt="Foto 4">
+    </div>
+
+    <script>
+        function atualizarContador() {
+            const inicioNamoro = new Date('2024-12-28T00:00:00');
+            const agora = new Date();
+            const diferenca = agora - inicioNamoro;
+            
+            const anos = Math.floor(diferenca / (1000 * 60 * 60 * 24 * 365));
+            const meses = Math.floor(diferenca / (1000 * 60 * 60 * 24 * 30)) % 12;
+            const dias = Math.floor(diferenca / (1000 * 60 * 60 * 24)) % 30;
+            const horas = Math.floor(diferenca / (1000 * 60 * 60)) % 24;
+            const minutos = Math.floor(diferenca / (1000 * 60)) % 60;
+            const segundos = Math.floor(diferenca / 1000) % 60;
+
+            document.getElementById('contador').innerHTML = 
+                `${anos} anos, ${meses} meses, ${dias} dias, ${horas} horas, ${minutos} minutos e ${segundos} segundos de amor! ❤️`;
+        }
+        setInterval(atualizarContador, 1000);
+        atualizarContador();
+        
+        function criarEstrelas() {
+            for (let i = 0; i < 50; i++) {
+                let star = document.createElement("div");
+                star.classList.add("star");
+                star.style.top = Math.random() * 100 + "vh";
+                star.style.left = Math.random() * 100 + "vw";
+                star.style.animationDuration = (Math.random() * 3 + 2) + "s";
+                document.body.appendChild(star);
+            }
+        }
+        criarEstrelas();
+    </script>
+</body>
+</html>
