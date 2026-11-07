@@ -6,6 +6,7 @@ Uso:
     python fb_bot.py publicar "Legenda" --reel VIDEO.mp4 [--quando DATA]
     python fb_bot.py agendar posts.json [--calendario calendario.json] [--simular]
     python fb_bot.py status ID_DO_REEL
+    python fb_bot.py conectar          (configura o token da Página no .env)
     python fb_bot.py verificar
 
 Configuração (variáveis de ambiente ou arquivo .env na mesma pasta):
@@ -19,6 +20,7 @@ Só usa a biblioteca padrão do Python (3.9+).
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import mimetypes
 import os
@@ -528,6 +530,119 @@ def agendar_arquivo(cliente: ClienteFacebook | None, arquivo: Path,
     return erros
 
 
+# ---------------------------------------------------------------- conexão (token)
+
+PERMISSOES_NECESSARIAS = ("pages_show_list", "pages_read_engagement", "pages_manage_posts")
+
+
+def _get(url: str, campos: dict) -> dict:
+    req = urllib.request.Request(f"{url}?{urllib.parse.urlencode(campos)}")
+    return ClienteFacebook._enviar(req)
+
+
+def salvar_env(valores: dict, caminho: Path = PASTA / ".env") -> None:
+    """Atualiza (ou cria) o .env mantendo as outras linhas."""
+    linhas = caminho.read_text(encoding="utf-8").splitlines() if caminho.exists() else []
+    restantes = dict(valores)
+    novas = []
+    for linha in linhas:
+        chave = linha.split("=", 1)[0].strip()
+        if chave in restantes and not linha.lstrip().startswith("#"):
+            novas.append(f"{chave}={restantes.pop(chave)}")
+        else:
+            novas.append(linha)
+    novas += [f"{k}={v}" for k, v in restantes.items()]
+    caminho.write_text("\n".join(novas) + "\n", encoding="utf-8")
+    try:
+        caminho.chmod(0o600)  # só o seu usuário pode ler o token
+    except OSError:
+        pass
+
+
+def obter_token_de_pagina(app_id: str, app_secret: str, token_usuario: str,
+                          escolher=None, versao: str = VERSAO_PADRAO) -> dict:
+    """Troca um token de usuário (curto) por um token de Página que não expira.
+
+    Devolve {"id", "name", "access_token", "expira", "faltando"}.
+    """
+    base = f"https://graph.facebook.com/{versao}"
+    # 1) token de usuário curto (~1h) -> token de usuário longo (~60 dias)
+    longo = _get(f"{base}/oauth/access_token", {
+        "grant_type": "fb_exchange_token", "client_id": app_id,
+        "client_secret": app_secret, "fb_exchange_token": token_usuario,
+    })["access_token"]
+
+    # 2) a partir do token longo, os tokens de Página não expiram
+    paginas = _get(f"{base}/me/accounts", {
+        "fields": "id,name,access_token,tasks", "limit": 100, "access_token": longo,
+    }).get("data", [])
+    if not paginas:
+        raise ErroFacebook(
+            "Nenhuma Página encontrada. Ao gerar o token, autorize a sua Página e as "
+            "permissões " + ", ".join(PERMISSOES_NECESSARIAS) + "."
+        )
+    if len(paginas) == 1:
+        pagina = paginas[0]
+    else:
+        pagina = paginas[(escolher or _escolher_no_terminal)([p["name"] for p in paginas])]
+
+    # 3) confere validade e permissões (só para avisar; não bloqueia)
+    resultado = {k: pagina[k] for k in ("id", "name", "access_token")}
+    resultado["expira"], resultado["faltando"] = None, []
+    try:
+        info = _get(f"{base}/debug_token", {
+            "input_token": pagina["access_token"],
+            "access_token": f"{app_id}|{app_secret}",
+        }).get("data", {})
+        resultado["expira"] = info.get("expires_at")
+        escopos = set(info.get("scopes", []))
+        resultado["faltando"] = [p for p in PERMISSOES_NECESSARIAS if p not in escopos]
+    except ErroFacebook:
+        pass
+    return resultado
+
+
+def _escolher_no_terminal(nomes: list[str]) -> int:
+    print("Você administra mais de uma Página:")
+    for i, nome in enumerate(nomes, 1):
+        print(f"  {i}) {nome}")
+    while True:
+        resp = input("Número da Página que o bot vai usar: ").strip()
+        if resp.isdigit() and 1 <= int(resp) <= len(nomes):
+            return int(resp) - 1
+        print("Opção inválida.")
+
+
+def comando_conectar() -> int:
+    carregar_env()
+    print("Conectar o bot à sua Página do Facebook (passo a passo no README).\n")
+    app_id = os.environ.get("FB_APP_ID") or input("ID do app (App ID): ").strip()
+    app_secret = (os.environ.get("FB_APP_SECRET")
+                  or getpass.getpass("Chave secreta do app (App Secret; não aparece "
+                                     "na tela ao colar): ").strip())
+    token = getpass.getpass("Token de acesso do usuário, do Graph API Explorer "
+                            "(não aparece na tela ao colar): ").strip()
+    if not (app_id and app_secret and token):
+        raise ErroFacebook("App ID, App Secret e token são obrigatórios.")
+
+    pagina = obter_token_de_pagina(app_id, app_secret, token,
+                                   versao=os.environ.get("FB_GRAPH_VERSION", VERSAO_PADRAO))
+    salvar_env({"FB_PAGE_ID": pagina["id"], "FB_PAGE_ACCESS_TOKEN": pagina["access_token"]})
+
+    print(f"\nPronto! Página conectada: {pagina['name']} (id {pagina['id']})")
+    print(f"Token salvo em {PASTA / '.env'} (não compartilhe esse arquivo).")
+    if pagina["expira"] == 0:
+        print("O token da Página não expira.")
+    elif pagina["expira"]:
+        data = datetime.fromtimestamp(pagina["expira"]).strftime("%d/%m/%Y")
+        print(f"Atenção: este token expira em {data}. Rode 'conectar' de novo antes disso.")
+    if pagina["faltando"]:
+        print("Atenção: faltam as permissões " + ", ".join(pagina["faltando"]) +
+              ". Gere o token de novo marcando essas permissões.")
+        return 1
+    return 0
+
+
 # ---------------------------------------------------------------- linha de comando
 
 def main(argv: list[str] | None = None) -> int:
@@ -539,6 +654,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Bot de postagem para Página do Facebook.")
     sub = p.add_subparsers(dest="comando", required=True)
 
+    sub.add_parser("conectar", help="conecta o bot à sua Página e salva o token no .env")
     sub.add_parser("verificar", help="testa o token e mostra o nome da Página")
 
     pub = sub.add_parser("publicar", help="publica (ou agenda) um post, foto ou Reel")
@@ -563,6 +679,8 @@ def main(argv: list[str] | None = None) -> int:
 
     args = p.parse_args(argv)
     try:
+        if args.comando == "conectar":
+            return comando_conectar()
         if args.comando == "agendar":
             caminho_cal = args.calendario
             if caminho_cal is None and (args.arquivo.parent / "calendario.json").exists():

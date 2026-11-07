@@ -308,5 +308,48 @@ class TestCalendario(unittest.TestCase):
             self.assertEqual(salvo[0]["mensagem"], "um")  # texto original preservado
 
 
+class TestConectar(unittest.TestCase):
+    @mock.patch("urllib.request.urlopen")
+    def test_troca_token_e_escolhe_pagina(self, urlopen):
+        urlopen.side_effect = [
+            resposta({"access_token": "LONGO"}),
+            resposta({"data": [{"id": "1", "name": "A", "access_token": "TA"},
+                               {"id": "2", "name": "B", "access_token": "TB"}]}),
+            resposta({"data": {"expires_at": 0, "scopes": [
+                "pages_show_list", "pages_read_engagement", "pages_manage_posts"]}}),
+        ]
+        r = fb_bot.obter_token_de_pagina("APP", "SEGREDO", "CURTO",
+                                         escolher=lambda nomes: nomes.index("B"))
+        self.assertEqual((r["id"], r["access_token"], r["expira"], r["faltando"]),
+                         ("2", "TB", 0, []))
+        urls = [c[0][0].full_url for c in urlopen.call_args_list]
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(urls[0]).query)
+        self.assertEqual(q["grant_type"], ["fb_exchange_token"])
+        self.assertEqual(q["fb_exchange_token"], ["CURTO"])
+        self.assertIn("access_token=LONGO", urls[1])
+        self.assertIn("input_token=TB", urls[2])
+
+    @mock.patch("urllib.request.urlopen")
+    def test_permissao_faltando_e_sem_paginas(self, urlopen):
+        urlopen.side_effect = [
+            resposta({"access_token": "L"}),
+            resposta({"data": [{"id": "1", "name": "A", "access_token": "TA"}]}),
+            resposta({"data": {"expires_at": 0, "scopes": ["pages_show_list"]}}),
+        ]
+        r = fb_bot.obter_token_de_pagina("APP", "S", "C")
+        self.assertEqual(r["faltando"], ["pages_read_engagement", "pages_manage_posts"])
+
+        urlopen.side_effect = [resposta({"access_token": "L"}), resposta({"data": []})]
+        with self.assertRaises(fb_bot.ErroFacebook):
+            fb_bot.obter_token_de_pagina("APP", "S", "C")
+
+    def test_salvar_env_preserva_linhas(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = Path(d) / ".env"
+            env.write_text("# comentario\nFB_PAGE_ID=velho\nFB_GRAPH_VERSION=v24.0\n")
+            fb_bot.salvar_env({"FB_PAGE_ID": "novo", "FB_PAGE_ACCESS_TOKEN": "tok"}, env)
+            self.assertEqual(env.read_text(), "# comentario\nFB_PAGE_ID=novo\n"
+                             "FB_GRAPH_VERSION=v24.0\nFB_PAGE_ACCESS_TOKEN=tok\n")
+
 if __name__ == "__main__":
     unittest.main()

@@ -6,37 +6,105 @@ usando a Graph API oficial. Só usa a biblioteca padrão do Python 3.9+ (sem `pi
 > ⚠️ A API do Facebook só permite postar em **Páginas**. Perfis pessoais não aceitam
 > postagem automática, e a postagem em Grupos pela API foi desativada pela Meta em 2024.
 
-## 1. Pegar o ID e o token da Página
+## 1. Conectar o bot ao Facebook (API)
 
-1. Acesse <https://developers.facebook.com/apps>, clique em **Criar app** e escolha um
-   caso de uso que inclua **gerenciar Páginas** (tipo *Business* / *Empresa*).
-2. Abra o **Graph API Explorer** (<https://developers.facebook.com/tools/explorer>),
-   selecione seu app e adicione as permissões:
+Você vai precisar de: uma conta pessoal do Facebook que seja **administradora da
+Página** e uns 10 minutos. Não precisa pagar nada nem enviar o app para análise da
+Meta: como o app é só seu e posta na sua própria Página, ele funciona no modo de
+desenvolvimento.
+
+### Passo 1: virar desenvolvedor (só na primeira vez)
+
+1. Entre em <https://developers.facebook.com> com a sua conta do Facebook.
+2. Clique em **Começar** (*Get Started*) e siga o cadastro (confirmar telefone/e-mail).
+
+### Passo 2: criar o app
+
+1. Vá em <https://developers.facebook.com/apps> e clique em **Criar app** (*Create App*).
+2. Dê um nome (ex.: `Bot Meu Amor`) e informe seu e-mail.
+3. No **caso de uso**, escolha **Gerenciar tudo na sua Página**
+   (*Manage everything on your Page*).
+4. Se perguntar por portfólio empresarial, pode escolher **Ainda não quero conectar**
+   um portfólio. Conclua a criação.
+5. No painel do app, abra **Casos de uso → Gerenciar tudo na sua Página →
+   Personalizar** e confirme que estas permissões estão adicionadas:
    `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`.
-3. Clique em **Generate Access Token** e autorize a sua Página.
-4. No campo **User or Page**, escolha a sua Página: o token mostrado agora é o
-   **token da Página**. Rode a consulta `me?fields=id,name` para ver o **ID da Página**.
-5. O token do Explorer expira em ~1 hora. Para um token que não expira:
-   - troque-o por um token de usuário de longa duração na
-     [Ferramenta de Depuração de Token](https://developers.facebook.com/tools/debug/accesstoken/)
-     (botão *Extend Access Token*);
-   - no Explorer, com esse token longo, consulte `me/accounts`: o `access_token` da sua
-     Página que aparece ali não expira.
 
-## 2. Configurar
+### Passo 3: copiar o App ID e o App Secret
+
+No menu do app, vá em **Configurações do app → Básico** (*App settings → Basic*):
+
+- **ID do app** (*App ID*): um número.
+- **Chave secreta do app** (*App Secret*): clique em **Mostrar** e copie.
+
+> 🔒 O App Secret é uma senha. Não mande para ninguém nem coloque no GitHub.
+
+### Passo 4: gerar o token no Graph API Explorer
+
+1. Abra <https://developers.facebook.com/tools/explorer>.
+2. À direita, em **Meta App**, escolha o app que você criou.
+3. Em **User or Page**, deixe **User Token** (token do usuário).
+4. Em **Permissions**, adicione: `pages_show_list`, `pages_read_engagement` e
+   `pages_manage_posts`.
+5. Clique em **Generate Access Token**. Na janela do Facebook, clique em
+   **Editar acesso** / **Continuar**, **marque a sua Página** e confirme.
+6. Copie o token que apareceu no campo **Access Token** (um texto longo que começa
+   com `EAA...`). Ele vale só ~1 hora, mas o próximo passo resolve isso.
+
+### Passo 5: rodar o `conectar`
+
+No computador, dentro da pasta do bot:
 
 ```bash
 cd facebook_bot
-cp .env.exemplo .env      # depois edite o .env com o ID e o token
+python3 fb_bot.py conectar
+```
+
+O bot pede o **App ID**, o **App Secret** e o **token** (o que você colar nos dois
+últimos não aparece na tela, isso é normal). Ele então:
+
+1. troca o token de 1 hora por um token de longa duração;
+2. pega o **token da Página**, que **não expira**;
+3. se você administra várias Páginas, pergunta qual usar;
+4. grava `FB_PAGE_ID` e `FB_PAGE_ACCESS_TOKEN` no arquivo `facebook_bot/.env`.
+
+O App Secret **não** é gravado. Para conferir:
+
+```bash
 python3 fb_bot.py verificar
 # Conectado à Página: Minha Página (id 1234...)
 ```
 
-O arquivo `.env` está no `.gitignore`: **nunca** faça commit do token.
-Em vez do `.env`, também dá para usar as variáveis de ambiente `FB_PAGE_ID` e
-`FB_PAGE_ACCESS_TOKEN`.
+Pronto: o bot está conectado.
 
-## 3. Usar
+> No Windows, use `python` ou `py` no lugar de `python3`.
+
+### Se algo der errado
+
+| Mensagem                                    | O que fazer                                                       |
+|---------------------------------------------|-------------------------------------------------------------------|
+| `Nenhuma Página encontrada`                 | Gere o token de novo e, na janela do Facebook, marque a Página.   |
+| `faltam as permissões ...`                  | Adicione as permissões que faltam no Explorer e gere de novo.     |
+| `(190) ... token inválido ou expirado`      | O token do Explorer passou de 1 hora: gere outro e rode `conectar`. |
+| `(10)` ou `(200) ... permissão faltando`    | Você precisa ser administrador da Página e ter as 3 permissões.   |
+| Erro sobre App Secret / `client_secret`     | Confira o App Secret em Configurações do app → Básico.            |
+
+O token da Página para de funcionar se você trocar a senha do Facebook, perder a
+função de administrador da Página ou remover o app nas configurações. Nesses casos, é
+só repetir os passos 4 e 5.
+
+**Os posts não aparecem para o público?** Apps em modo de desenvolvimento podem ter
+alcance limitado. Nesse caso, publique o app: no painel, preencha a **URL da política
+de privacidade** em Configurações do app → Básico e mude o app para o modo **Ao vivo**
+(*Live*).
+
+### Configurar à mão (opcional)
+
+Se já tiver um token de Página, copie `.env.exemplo` para `.env` e preencha
+`FB_PAGE_ID` e `FB_PAGE_ACCESS_TOKEN`. O `.env` está no `.gitignore`: **nunca** faça
+commit dele. Também dá para usar variáveis de ambiente com esses mesmos nomes.
+
+## 2. Usar
 
 **Publicar agora:**
 
@@ -110,7 +178,7 @@ Veja exemplos de cada tipo em `posts.exemplo.json`. Caminhos de arquivo podem se
 relativos à pasta onde você roda o comando ou à pasta `facebook_bot`. Depois de enviado, o bot grava o `id_facebook` no
 próprio arquivo, então rodar de novo não duplica posts: é só acrescentar novos itens.
 
-## 4. Horários fixos, legendas e hashtags (calendário)
+## 3. Horários fixos, legendas e hashtags (calendário)
 
 O arquivo `calendario.json` define **em que horários** a Página posta e quais
 **hashtags** e **assinatura** entram em todas as legendas:
