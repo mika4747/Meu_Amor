@@ -4,13 +4,18 @@
     "quando": "2026-11-20T09:00"
   },
   {
-    "mensagem": "Confira nossa página especial:",
-    "link": "https://example.com",
+    "mensagem": "Novidade na loja 📸",
+    "imagem": "imagens/foto1.jpg",
+    "quando": "2026-11-22T12:00"
+  },
+  {
+    "mensagem": "Fotos do nosso fim de semana 💛",
+    "imagens": ["imagens/foto1.jpg", "imagens/foto2.jpg", "imagens/foto3.jpg"],
     "quando": "2026-11-25T18:30"
   },
   {
-    "mensagem": "Boas festas! 🎄",
-    "imagem": "imagens/natal.jpg",
+    "mensagem": "Bastidores 🎬 #reels",
+    "reel": "videos/bastidores.mp4",
     "quando": "2026-12-01T20:00-03:00"
   }
 ]
