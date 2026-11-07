@@ -216,5 +216,97 @@ class TestFila(unittest.TestCase):
             self.assertNotIn("id_facebook", arq.read_text())
 
 
+class TestLegenda(unittest.TestCase):
+    def test_normalizar(self):
+        self.assertEqual(fb_bot.normalizar_hashtags(["amor", "#Viagem"], "viagem, #foto praia"),
+                         ["#amor", "#Viagem", "#foto", "#praia"])
+        self.assertEqual(fb_bot.normalizar_hashtags(None, "", []), [])
+
+    def test_montar(self):
+        self.assertEqual(fb_bot.montar_legenda("Oi", ["#a", "#b"], "Siga!"),
+                         "Oi\n\nSiga!\n\n#a #b")
+        # não repete hashtag que já está no texto
+        self.assertEqual(fb_bot.montar_legenda("Muito #amor!", ["#amor", "#x"]),
+                         "Muito #amor!\n\n#x")
+        self.assertEqual(fb_bot.montar_legenda("", ["#a"]), "#a")
+        self.assertEqual(fb_bot.montar_legenda("Só texto"), "Só texto")
+
+
+def _calendario(d, **extra):
+    dados = {"horarios": ["19:00", "09:00"], "fuso": "-03:00", **extra}
+    arq = Path(d) / "calendario.json"
+    arq.write_text(json.dumps(dados))
+    return fb_bot.carregar_calendario(arq)
+
+
+BRT = timezone(timedelta(hours=-3))
+# Sábado, 07/11/2026, 10:00 em Brasília
+AGORA = datetime(2026, 11, 7, 10, 0, tzinfo=BRT)
+
+
+class TestCalendario(unittest.TestCase):
+    def test_proximos_horarios(self):
+        with tempfile.TemporaryDirectory() as d:
+            cal = _calendario(d)
+        horarios = list(fb_bot.proximos_horarios(cal, set(), AGORA))
+        self.assertEqual(horarios[0], datetime(2026, 11, 7, 19, 0, tzinfo=BRT))
+        self.assertEqual(horarios[1], datetime(2026, 11, 8, 9, 0, tzinfo=BRT))
+        self.assertLessEqual(horarios[-1], AGORA + timedelta(days=30))
+        self.assertGreater(len(horarios), 55)
+
+    def test_dias_e_ocupados(self):
+        with tempfile.TemporaryDirectory() as d:
+            cal = _calendario(d, horarios=["09:00"], dias=["seg", "Quarta"])
+        ocupado = int(datetime(2026, 11, 9, 9, 0, tzinfo=BRT).timestamp())
+        gerador = fb_bot.proximos_horarios(cal, {ocupado}, AGORA)
+        self.assertEqual(next(gerador), datetime(2026, 11, 11, 9, 0, tzinfo=BRT))  # qua
+        self.assertEqual(next(gerador), datetime(2026, 11, 16, 9, 0, tzinfo=BRT))  # seg
+
+    def test_horario_muito_proximo_e_pulado(self):
+        with tempfile.TemporaryDirectory() as d:
+            cal = _calendario(d, horarios=["10:10", "11:00"])
+        self.assertEqual(next(fb_bot.proximos_horarios(cal, set(), AGORA)),
+                         datetime(2026, 11, 7, 11, 0, tzinfo=BRT))
+
+    def test_calendario_invalido(self):
+        with tempfile.TemporaryDirectory() as d:
+            for ruim in ({"horarios": []}, {"horarios": ["25h"]},
+                         {"horarios": ["09:00"], "dias": ["xyz"]},
+                         {"horarios": ["09:00"], "fuso": "Lua/Base"}):
+                arq = Path(d) / "c.json"
+                arq.write_text(json.dumps(ruim))
+                with self.assertRaises(fb_bot.ErroFacebook):
+                    fb_bot.carregar_calendario(arq)
+
+    def test_agendar_com_calendario(self):
+        agora = datetime.now(BRT).replace(second=0, microsecond=0)
+        with tempfile.TemporaryDirectory() as d:
+            cal = _calendario(d, hashtags=["amor"], assinatura="Siga!")
+            arq = Path(d) / "posts.json"
+            marcado = (agora + timedelta(days=2)).replace(hour=12, minute=0)
+            arq.write_text(json.dumps([
+                {"mensagem": "um", "hashtags": "#extra"},
+                {"mensagem": "dois"},
+                {"mensagem": "marcado", "quando": marcado.isoformat()},
+                {"mensagem": "falha"},
+            ]))
+            cliente = mock.Mock()
+            cliente.publicar.side_effect = [{"id": "p1"}, {"id": "p2"}, {"id": "p3"},
+                                            fb_bot.ErroFacebook("recusado")]
+            erros = fb_bot.agendar_arquivo(cliente, arq, calendario=cal)
+            self.assertEqual(erros, 1)
+            chamadas = cliente.publicar.call_args_list
+            self.assertEqual(chamadas[0][0][0], "um\n\nSiga!\n\n#amor #extra")
+            self.assertEqual(chamadas[1][0][0], "dois\n\nSiga!\n\n#amor")
+            q1, q2 = chamadas[0][0][4], chamadas[1][0][4]
+            self.assertLess(q1, q2)
+            self.assertIn(q1.astimezone(BRT).hour, (9, 19))
+            salvo = json.loads(arq.read_text())
+            self.assertEqual(salvo[0]["quando"], q1.isoformat(timespec="minutes"))
+            self.assertEqual(salvo[2]["quando"], marcado.isoformat())  # não mexe
+            self.assertNotIn("quando", salvo[3])  # falhou: horário liberado
+            self.assertEqual(salvo[0]["mensagem"], "um")  # texto original preservado
+
+
 if __name__ == "__main__":
     unittest.main()

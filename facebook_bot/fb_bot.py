@@ -4,7 +4,7 @@
 Uso:
     python fb_bot.py publicar "Texto" [--link URL] [--imagem ARQ_OU_URL ...] [--quando DATA]
     python fb_bot.py publicar "Legenda" --reel VIDEO.mp4 [--quando DATA]
-    python fb_bot.py agendar posts.json [--simular]
+    python fb_bot.py agendar posts.json [--calendario calendario.json] [--simular]
     python fb_bot.py status ID_DO_REEL
     python fb_bot.py verificar
 
@@ -28,7 +28,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 PASTA = Path(__file__).resolve().parent
@@ -306,6 +306,108 @@ def _id_do_post(resp: dict) -> str:
     return resp.get("post_id") or resp.get("id") or "?"
 
 
+# ---------------------------------------------------------------- legendas e hashtags
+
+def normalizar_hashtags(*grupos) -> list[str]:
+    """Junta hashtags de listas ou textos ("amor, #foto viagem") no formato #palavra."""
+    vistas: set[str] = set()
+    saida: list[str] = []
+    for grupo in grupos:
+        if not grupo:
+            continue
+        itens = grupo.replace(",", " ").split() if isinstance(grupo, str) else grupo
+        for item in itens:
+            tag = "#" + "".join(str(item).split()).lstrip("#")
+            if tag != "#" and tag.lower() not in vistas:
+                vistas.add(tag.lower())
+                saida.append(tag)
+    return saida
+
+
+def montar_legenda(mensagem: str = "", hashtags: list[str] | None = None,
+                   assinatura: str = "") -> str:
+    """Texto + assinatura + hashtags (sem repetir hashtags que já estão no texto)."""
+    partes = [p.strip() for p in (mensagem, assinatura) if p and p.strip()]
+    texto = "\n\n".join(partes)
+    ja_no_texto = {palavra.lower().rstrip(".,!?;:") for palavra in texto.split()}
+    novas = [h for h in (hashtags or []) if h.lower() not in ja_no_texto]
+    if novas:
+        texto = f"{texto}\n\n{' '.join(novas)}".strip()
+    return texto
+
+
+# ---------------------------------------------------------------- calendário
+
+DIAS_DA_SEMANA = {"seg": 0, "ter": 1, "qua": 2, "qui": 3, "sex": 4,
+                  "sab": 5, "sáb": 5, "dom": 6}
+
+
+def _ler_fuso(texto: str):
+    texto = (texto or "-03:00").strip()
+    if texto[:1] in "+-":
+        try:
+            horas, minutos = texto[1:].split(":")
+            delta = timedelta(hours=int(horas), minutes=int(minutos))
+        except ValueError:
+            raise ErroFacebook(f"Fuso inválido: {texto!r} (use algo como -03:00)") from None
+        return timezone(-delta if texto[0] == "-" else delta)
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(texto)
+    except Exception:
+        raise ErroFacebook(f"Fuso desconhecido: {texto!r} (use algo como -03:00)") from None
+
+
+def carregar_calendario(caminho: Path) -> dict:
+    try:
+        dados = json.loads(caminho.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise ErroFacebook(f"Calendário não encontrado: {caminho}") from None
+    except ValueError as e:
+        raise ErroFacebook(f"{caminho} não é um JSON válido: {e}") from None
+
+    horarios = []
+    for h in dados.get("horarios") or []:
+        try:
+            horarios.append(datetime.strptime(h.strip(), "%H:%M").time())
+        except (ValueError, AttributeError):
+            raise ErroFacebook(f"Horário inválido no calendário: {h!r} (use 09:00)") from None
+    if not horarios:
+        raise ErroFacebook(f"{caminho}: informe pelo menos um horário em \"horarios\".")
+
+    dias = set()
+    for d in dados.get("dias") or list(DIAS_DA_SEMANA):
+        chave = str(d).strip().lower()[:3]
+        if chave not in DIAS_DA_SEMANA:
+            raise ErroFacebook(f"Dia inválido no calendário: {d!r} (use seg, ter, ... dom)")
+        dias.add(DIAS_DA_SEMANA[chave])
+
+    return {
+        "horarios": sorted(set(horarios)),
+        "dias": dias,
+        "fuso": _ler_fuso(dados.get("fuso", "-03:00")),
+        "hashtags": normalizar_hashtags(dados.get("hashtags")),
+        "assinatura": dados.get("assinatura", ""),
+    }
+
+
+def proximos_horarios(calendario: dict, ocupados: set[int],
+                      agora: datetime | None = None):
+    """Gera, em ordem, os horários livres do calendário que o Facebook aceita."""
+    fuso = calendario["fuso"]
+    agora = (agora or datetime.now(timezone.utc)).astimezone(fuso)
+    inicio = agora + timedelta(seconds=AGENDAMENTO_MINIMO_S + 5 * 60)  # folga de 5 min
+    fim = agora + timedelta(seconds=AGENDAMENTO_MAXIMO_S - 60 * 60)
+    dia = inicio.date()
+    while dia <= fim.date():
+        if dia.weekday() in calendario["dias"]:
+            for h in calendario["horarios"]:
+                dt = datetime.combine(dia, h, tzinfo=fuso)
+                if inicio <= dt <= fim and int(dt.timestamp()) not in ocupados:
+                    yield dt
+        dia += timedelta(days=1)
+
+
 # ---------------------------------------------------------------- fila de posts
 
 def _imagens_do_post(post: dict) -> list[str]:
@@ -317,54 +419,123 @@ def _imagens_do_post(post: dict) -> list[str]:
     return imagens
 
 
+def _distribuir_horarios(posts: list[dict], calendario: dict,
+                         agora: datetime | None) -> tuple[set[int], int]:
+    """Põe "quando" nos posts pendentes que não têm horário.
+
+    Devolve (índices preenchidos agora, quantos ficaram sem vaga).
+    """
+    ocupados = set()
+    for post in posts:
+        quando = post.get("quando")
+        if quando and quando != "agora":
+            try:
+                ocupados.add(int(ler_horario(quando).timestamp()))
+            except ErroFacebook:
+                pass  # o erro aparece ao processar esse post
+    livres = proximos_horarios(calendario, ocupados, agora)
+    preenchidos, sem_vaga = set(), 0
+    for i, post in enumerate(posts):
+        if post.get("id_facebook") or post.get("quando"):
+            continue
+        dt = next(livres, None)
+        if dt is None:
+            sem_vaga += 1
+            continue
+        post["quando"] = dt.isoformat(timespec="minutes")
+        preenchidos.add(i)
+    return preenchidos, sem_vaga
+
+
+def _salvar(arquivo: Path, posts: list[dict], preenchidos: set[int]) -> None:
+    """Grava o arquivo. Horários escolhidos pelo calendário só ficam gravados nos
+    posts que foram de fato enviados; os outros ganham um horário novo na próxima vez."""
+    copia = []
+    for i, post in enumerate(posts):
+        if i in preenchidos and not post.get("id_facebook"):
+            post = {k: v for k, v in post.items() if k != "quando"}
+        copia.append(post)
+    arquivo.write_text(json.dumps(copia, ensure_ascii=False, indent=2) + "\n",
+                       encoding="utf-8")
+
+
 def agendar_arquivo(cliente: ClienteFacebook | None, arquivo: Path,
-                    simular: bool = False) -> int:
+                    simular: bool = False, calendario: dict | None = None,
+                    agora: datetime | None = None) -> int:
     """Agenda no Facebook todos os posts do arquivo JSON que ainda não foram enviados.
 
-    Cada post enviado ganha o campo "id_facebook" no próprio arquivo, então rodar o
-    comando de novo não duplica nada. Devolve o número de erros.
+    Com um calendário, posts sem "quando" vão para o próximo horário livre e as
+    hashtags/assinatura do calendário entram na legenda. Cada post enviado ganha o
+    campo "id_facebook" no próprio arquivo, então rodar de novo não duplica nada.
+    Devolve o número de erros.
     """
     posts = json.loads(arquivo.read_text(encoding="utf-8"))
     if not isinstance(posts, list):
         raise ErroFacebook(f"{arquivo} deve conter uma lista de posts.")
 
+    preenchidos, sem_vaga = (_distribuir_horarios(posts, calendario, agora)
+                             if calendario else (set(), 0))
+    hashtags_gerais = calendario["hashtags"] if calendario else []
+    assinatura = calendario["assinatura"] if calendario else ""
+
     erros = 0
-    for i, post in enumerate(posts, 1):
-        rotulo = f"[{i}/{len(posts)}]"
+    for i, post in enumerate(posts):
+        rotulo = f"[{i + 1}/{len(posts)}]"
         if post.get("id_facebook"):
             print(f"{rotulo} já enviado ({post['id_facebook']}), pulando.")
             continue
+        if calendario and not post.get("quando"):
+            print(f"{rotulo} sem horário livre nos próximos 30 dias; fica para depois.")
+            continue
         try:
-            quando = ler_horario(post["quando"]) if post.get("quando") else None
+            texto_quando = post.get("quando")
+            quando = (ler_horario(texto_quando)
+                      if texto_quando and texto_quando != "agora" else None)
             if quando is not None:
                 validar_horario(quando)
             imagens = _imagens_do_post(post)
             tipo = ("reel" if post.get("reel") else
                     f"{len(imagens)} fotos" if len(imagens) > 1 else
                     "foto" if imagens else "texto")
+            legenda = montar_legenda(
+                post.get("mensagem", ""),
+                normalizar_hashtags(hashtags_gerais, post.get("hashtags")),
+                post.get("assinatura", assinatura),
+            )
             resumo = (post.get("mensagem") or post.get("link") or post.get("reel")
                       or (imagens[0] if imagens else ""))[:50]
             acao = f"agendar para {quando:%d/%m/%Y %H:%M}" if quando else "publicar agora"
             if simular:
                 print(f"{rotulo} (simulação) {acao} [{tipo}]: {resumo!r}")
+                linhas = legenda.splitlines() or [""]
+                print("      legenda: " + linhas[0])
+                for linha in linhas[1:]:
+                    print(f"               {linha}".rstrip())
                 continue
             assert cliente is not None
-            resp = cliente.publicar(post.get("mensagem", ""), post.get("link"),
-                                    imagens, post.get("reel"), quando)
+            resp = cliente.publicar(legenda, post.get("link"), imagens,
+                                    post.get("reel"), quando)
             post["id_facebook"] = _id_do_post(resp)
             print(f"{rotulo} ok, {acao} [{tipo}]: {resumo!r} -> {post['id_facebook']}")
             # Salva a cada post para não perder o progresso se algo falhar depois.
-            arquivo.write_text(json.dumps(posts, ensure_ascii=False, indent=2) + "\n",
-                               encoding="utf-8")
+            _salvar(arquivo, posts, preenchidos)
         except (ErroFacebook, KeyError) as e:
             erros += 1
             print(f"{rotulo} ERRO: {e}", file=sys.stderr)
+    if sem_vaga:
+        print(f"{sem_vaga} post(s) aguardando vaga: rode o comando de novo nos "
+              "próximos dias (o Facebook só agenda até 30 dias à frente).")
     return erros
 
 
 # ---------------------------------------------------------------- linha de comando
 
 def main(argv: list[str] | None = None) -> int:
+    for fluxo in (sys.stdout, sys.stderr):
+        try:  # evita erro com emojis em terminais do Windows
+            fluxo.reconfigure(errors="replace")
+        except AttributeError:
+            pass
     p = argparse.ArgumentParser(description="Bot de postagem para Página do Facebook.")
     sub = p.add_subparsers(dest="comando", required=True)
 
@@ -376,10 +547,14 @@ def main(argv: list[str] | None = None) -> int:
     pub.add_argument("--imagem", action="append", metavar="ARQ_OU_URL",
                      help="imagem (arquivo ou URL); repita para postar várias juntas")
     pub.add_argument("--reel", metavar="VIDEO", help="vídeo vertical (arquivo ou URL)")
+    pub.add_argument("--hashtags", help='hashtags para a legenda, ex.: "#amor #viagem"')
     pub.add_argument("--quando", help="agendar, ex.: 2026-12-24T20:00")
 
     ag = sub.add_parser("agendar", help="agenda todos os posts de um arquivo JSON")
     ag.add_argument("arquivo", type=Path)
+    ag.add_argument("--calendario", type=Path,
+                    help="horários fixos e hashtags (padrão: calendario.json ao lado "
+                         "do arquivo de posts, se existir)")
     ag.add_argument("--simular", action="store_true",
                     help="mostra o que seria feito, sem enviar nada")
 
@@ -389,8 +564,15 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     try:
         if args.comando == "agendar":
+            caminho_cal = args.calendario
+            if caminho_cal is None and (args.arquivo.parent / "calendario.json").exists():
+                caminho_cal = args.arquivo.parent / "calendario.json"
+            calendario = carregar_calendario(caminho_cal) if caminho_cal else None
+            if caminho_cal:
+                print(f"Usando o calendário {caminho_cal}")
             cliente = None if args.simular else ClienteFacebook.do_ambiente()
-            return 1 if agendar_arquivo(cliente, args.arquivo, args.simular) else 0
+            erros = agendar_arquivo(cliente, args.arquivo, args.simular, calendario)
+            return 1 if erros else 0
 
         cliente = ClienteFacebook.do_ambiente()
         if args.comando == "verificar":
@@ -401,8 +583,8 @@ def main(argv: list[str] | None = None) -> int:
                              ensure_ascii=False, indent=2))
         else:
             quando = ler_horario(args.quando) if args.quando else None
-            resp = cliente.publicar(args.mensagem, args.link, args.imagem,
-                                    args.reel, quando)
+            legenda = montar_legenda(args.mensagem, normalizar_hashtags(args.hashtags))
+            resp = cliente.publicar(legenda, args.link, args.imagem, args.reel, quando)
             estado = "Agendado" if quando else "Publicado"
             print(f"{estado}! id: {_id_do_post(resp)}")
             if args.reel:

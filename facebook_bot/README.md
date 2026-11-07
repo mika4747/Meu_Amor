@@ -110,6 +110,72 @@ Veja exemplos de cada tipo em `posts.exemplo.json`. Caminhos de arquivo podem se
 relativos à pasta onde você roda o comando ou à pasta `facebook_bot`. Depois de enviado, o bot grava o `id_facebook` no
 próprio arquivo, então rodar de novo não duplica posts: é só acrescentar novos itens.
 
+## 4. Horários fixos, legendas e hashtags (calendário)
+
+O arquivo `calendario.json` define **em que horários** a Página posta e quais
+**hashtags** e **assinatura** entram em todas as legendas:
+
+```json
+{
+  "horarios": ["09:00", "12:30", "19:00"],
+  "dias": ["seg", "ter", "qua", "qui", "sex", "sab", "dom"],
+  "fuso": "-03:00",
+  "hashtags": ["#meuamor", "#amor"],
+  "assinatura": "💛 Siga a página para mais!"
+}
+```
+
+| Campo        | O que é                                                          |
+|--------------|------------------------------------------------------------------|
+| `horarios`   | horários de postagem de cada dia                                 |
+| `dias`       | dias da semana em que posta (`seg` a `dom`); sem ele, todos      |
+| `fuso`       | fuso dos horários; `-03:00` é o horário de Brasília              |
+| `hashtags`   | hashtags que vão em **todos** os posts                           |
+| `assinatura` | frase que vai no fim de todas as legendas (opcional)             |
+
+Se existir um `calendario.json` na mesma pasta do arquivo de posts, o comando
+`agendar` usa ele automaticamente (ou indique outro com `--calendario arquivo.json`).
+
+Com o calendário, você **não precisa escrever datas**: cada post sem `quando` vai para
+o próximo horário livre, na ordem do arquivo. Cada post pode ter também as suas
+próprias hashtags, que se somam às do calendário:
+
+```json
+[
+  { "mensagem": "Bom dia! ☀️", "hashtags": ["#bomdia", "#motivação"] },
+  { "mensagem": "Bastidores 🎬", "reel": "videos/bastidores.mp4", "hashtags": "#reels #bastidores" }
+]
+```
+
+A legenda publicada fica assim:
+
+```
+Bom dia! ☀️
+
+💛 Siga a página para mais!
+
+#meuamor #amor #bomdia #motivação
+```
+
+Dicas:
+
+- Rode com `--simular` para ver o dia, a hora e a legenda de cada post antes de enviar.
+- As hashtags podem ser escritas com ou sem `#`; repetidas são ignoradas, e as que já
+  estão no texto não são duplicadas.
+- Um post com `quando` próprio usa esse horário (e aquele horário fica ocupado). Use
+  `"quando": "agora"` para publicar na hora.
+- O Facebook só agenda até 30 dias à frente. Se houver mais posts que horários livres
+  nesse período, os que sobrarem esperam: é só rodar `agendar` de novo uns dias depois
+  (pode adicionar posts novos no arquivo antes).
+- Uma assinatura diferente num post específico: use `"assinatura"` no próprio post
+  (`""` para nenhuma).
+
+Para um post avulso, também dá para passar hashtags na linha de comando:
+
+```bash
+python3 fb_bot.py publicar "Pôr do sol 🌅" --imagem sol.jpg --hashtags "#natureza #pordosol"
+```
+
 ### Regras do Facebook para agendamento
 
 - O horário precisa estar entre **10 minutos** e **30 dias** no futuro.
