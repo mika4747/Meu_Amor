@@ -1,0 +1,16 @@
+[
+  {
+    "mensagem": "Bom dia! ☀️ Uma ótima semana para todos.",
+    "quando": "2026-11-20T09:00"
+  },
+  {
+    "mensagem": "Confira nossa página especial:",
+    "link": "https://example.com",
+    "quando": "2026-11-25T18:30"
+  },
+  {
+    "mensagem": "Boas festas! 🎄",
+    "imagem": "imagens/natal.jpg",
+    "quando": "2026-12-01T20:00-03:00"
+  }
+]
