@@ -24,3 +24,10 @@ TestResults.xml
 facebook_bot/.env
 facebook_bot/posts.json
 __pycache__/
+
+### App Android ###
+android_app/.gradle/
+android_app/build/
+android_app/app/build/
+android_app/local.properties
+.kotlin/

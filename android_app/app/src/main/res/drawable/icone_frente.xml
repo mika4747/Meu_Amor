@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Coração com um aviãozinho de papel (enviar) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#C2185B"
+        android:pathData="M54,78 L33,58 C26,51 26,40 33,35 C39,30 48,32 54,40 C60,32 69,30 75,35 C82,40 82,51 75,58 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M42,50 L68,40 L60,64 L55,55 Z" />
+    <path
+        android:fillColor="#F8BBD0"
+        android:pathData="M55,55 L68,40 L57,57 Z" />
+</vector>
