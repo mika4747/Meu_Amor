@@ -186,34 +186,117 @@ class TestHorario(unittest.TestCase):
             fb_bot.ler_horario("amanhã")
 
 
+PAGINAS = [{"id": "111", "nome": "Meu Amor", "token": "T1", "padrao": True},
+           {"id": "222", "nome": "Loja", "token": "T2"}]
+
+
+def conta_falsa(clientes=None):
+    """Conta com duas Páginas; clientes = {id: Mock}. Devolve (conta, clientes)."""
+    clientes = clientes or {}
+    for p in PAGINAS:
+        clientes.setdefault(p["id"], mock.Mock())
+    paginas = [dict(p) for p in PAGINAS]
+    return fb_bot.Conta(paginas, fabrica=lambda p: clientes[p["id"]]), clientes
+
+
+class TestConta(unittest.TestCase):
+    def test_resolver(self):
+        conta, _ = conta_falsa()
+        self.assertEqual([p["id"] for p in conta.resolver(None)], ["111"])
+        self.assertEqual([p["id"] for p in conta.resolver("loja")], ["222"])
+        self.assertEqual([p["id"] for p in conta.resolver("Loja, 111")], ["222", "111"])
+        self.assertEqual([p["id"] for p in conta.resolver(["Todas"])], ["111", "222"])
+        self.assertEqual([p["id"] for p in conta.resolver(["Loja", "loja"])], ["222"])
+        with self.assertRaises(fb_bot.ErroFacebook) as ctx:
+            conta.resolver("Outra")
+        self.assertIn("Meu Amor, Loja", str(ctx.exception))
+
+    def test_sem_paginas(self):
+        with self.assertRaises(fb_bot.ErroFacebook):
+            fb_bot.Conta([]).resolver(None)
+        with self.assertRaises(fb_bot.ErroFacebook):
+            fb_bot.Conta([]).resolver("todas")
+
+    def test_padrao_e_salvar(self):
+        conta, _ = conta_falsa()
+        conta.definir_padrao("Loja")
+        self.assertEqual(conta.padrao()["nome"], "Loja")
+        with tempfile.TemporaryDirectory() as d:
+            arq = Path(d) / "paginas.json"
+            conta.salvar(arq)
+            self.assertEqual(arq.stat().st_mode & 0o777, 0o600)
+            relida = fb_bot.Conta.do_ambiente(arq)
+            self.assertEqual(relida.padrao()["id"], "222")
+
+    def test_env_antigo_vira_pagina_unica(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(
+                "os.environ", {"FB_PAGE_ID": "9", "FB_PAGE_ACCESS_TOKEN": "TK"}):
+            conta = fb_bot.Conta.do_ambiente(Path(d) / "nao_existe.json")
+        self.assertEqual(conta.padrao()["token"], "TK")
+
+
 class TestFila(unittest.TestCase):
     def test_agenda_e_nao_duplica(self):
         quando = (datetime.now().astimezone() + timedelta(days=1)).isoformat()
         posts = [{"mensagem": "a", "quando": quando},
-                 {"mensagem": "b", "id_facebook": "ja"},
+                 {"mensagem": "b", "id_facebook": "ja"},   # formato antigo
                  {"mensagem": "c", "quando": "ontem"}]
         with tempfile.TemporaryDirectory() as d:
             arq = Path(d) / "posts.json"
             arq.write_text(json.dumps(posts))
-            cliente = mock.Mock()
-            cliente.publicar.return_value = {"id": "111_1"}
-            erros = fb_bot.agendar_arquivo(cliente, arq)
-            cliente.publicar.assert_called_once_with("a", None, [], None, mock.ANY)
+            conta, cli = conta_falsa()
+            cli["111"].publicar.return_value = {"id": "111_1"}
+            erros = fb_bot.agendar_arquivo(conta, arq)
+            cli["111"].publicar.assert_called_once_with("a", None, [], None, mock.ANY)
+            cli["222"].publicar.assert_not_called()  # sem "paginas": só a padrão
             self.assertEqual(erros, 1)  # "ontem" é inválido
-            self.assertEqual(cliente.publicar.call_count, 1)
             salvo = json.loads(arq.read_text())
-            self.assertEqual(salvo[0]["id_facebook"], "111_1")
+            self.assertEqual(salvo[0]["enviados"], {"111": "111_1"})
 
-            cliente.reset_mock()
-            fb_bot.agendar_arquivo(cliente, arq)
-            self.assertEqual(cliente.publicar.call_count, 0)
+            cli["111"].reset_mock()
+            fb_bot.agendar_arquivo(conta, arq)
+            cli["111"].publicar.assert_not_called()
+
+    def test_varias_paginas_e_reenvio_so_da_que_falhou(self):
+        quando = (datetime.now().astimezone() + timedelta(days=1)).isoformat()
+        with tempfile.TemporaryDirectory() as d:
+            arq = Path(d) / "posts.json"
+            arq.write_text(json.dumps([
+                {"mensagem": "todas", "quando": quando, "paginas": "todas"},
+                {"mensagem": "só loja", "quando": quando, "paginas": ["Loja"]},
+                {"mensagem": "errada", "paginas": "Inexistente"},
+            ]))
+            conta, cli = conta_falsa()
+            cli["111"].publicar.return_value = {"id": "111_A"}
+            cli["222"].publicar.side_effect = [fb_bot.ErroFacebook("fora do ar"),
+                                               {"id": "222_B"}]
+            erros = fb_bot.agendar_arquivo(conta, arq)
+            self.assertEqual(erros, 2)  # Loja falhou no 1º + Página inexistente
+            salvo = json.loads(arq.read_text())
+            self.assertEqual(salvo[0]["enviados"], {"111": "111_A"})
+            self.assertEqual(salvo[1]["enviados"], {"222": "222_B"})
+            self.assertNotIn("enviados", salvo[2])
+
+            # segunda rodada: só a Loja do 1º post é tentada de novo
+            cli["111"].reset_mock()
+            cli["222"].publicar.side_effect = None
+            cli["222"].publicar.return_value = {"id": "222_A"}
+            fb_bot.agendar_arquivo(conta, arq)
+            cli["111"].publicar.assert_not_called()
+            self.assertEqual(cli["222"].publicar.call_count, 3)  # 2 na 1ª rodada + 1
+            self.assertEqual(cli["222"].publicar.call_args_list[-1][0][0], "todas")
+            salvo = json.loads(arq.read_text())
+            self.assertEqual(salvo[0]["enviados"], {"111": "111_A", "222": "222_A"})
 
     def test_simular_nao_envia(self):
         with tempfile.TemporaryDirectory() as d:
             arq = Path(d) / "posts.json"
-            arq.write_text(json.dumps([{"mensagem": "x"}]))
+            arq.write_text(json.dumps([{"mensagem": "x", "paginas": "Loja"}]))
             self.assertEqual(fb_bot.agendar_arquivo(None, arq, simular=True), 0)
-            self.assertNotIn("id_facebook", arq.read_text())
+            conta, cli = conta_falsa()
+            self.assertEqual(fb_bot.agendar_arquivo(conta, arq, simular=True), 0)
+            cli["222"].publicar.assert_not_called()
+            self.assertNotIn("enviados", arq.read_text())
 
 
 class TestLegenda(unittest.TestCase):
@@ -290,10 +373,11 @@ class TestCalendario(unittest.TestCase):
                 {"mensagem": "marcado", "quando": marcado.isoformat()},
                 {"mensagem": "falha"},
             ]))
-            cliente = mock.Mock()
+            conta, cli = conta_falsa()
+            cliente = cli["111"]
             cliente.publicar.side_effect = [{"id": "p1"}, {"id": "p2"}, {"id": "p3"},
                                             fb_bot.ErroFacebook("recusado")]
-            erros = fb_bot.agendar_arquivo(cliente, arq, calendario=cal)
+            erros = fb_bot.agendar_arquivo(conta, arq, calendario=cal)
             self.assertEqual(erros, 1)
             chamadas = cliente.publicar.call_args_list
             self.assertEqual(chamadas[0][0][0], "um\n\nSiga!\n\n#amor #extra")
@@ -309,39 +393,62 @@ class TestCalendario(unittest.TestCase):
 
 
 class TestConectar(unittest.TestCase):
+    ESCOPOS = ["pages_show_list", "pages_read_engagement", "pages_manage_posts"]
+
     @mock.patch("urllib.request.urlopen")
-    def test_troca_token_e_escolhe_pagina(self, urlopen):
+    def test_conecta_todas_as_paginas_com_paginacao(self, urlopen):
         urlopen.side_effect = [
             resposta({"access_token": "LONGO"}),
-            resposta({"data": [{"id": "1", "name": "A", "access_token": "TA"},
-                               {"id": "2", "name": "B", "access_token": "TB"}]}),
-            resposta({"data": {"expires_at": 0, "scopes": [
-                "pages_show_list", "pages_read_engagement", "pages_manage_posts"]}}),
-        ]
-        r = fb_bot.obter_token_de_pagina("APP", "SEGREDO", "CURTO",
-                                         escolher=lambda nomes: nomes.index("B"))
-        self.assertEqual((r["id"], r["access_token"], r["expira"], r["faltando"]),
-                         ("2", "TB", 0, []))
-        urls = [c[0][0].full_url for c in urlopen.call_args_list]
-        q = urllib.parse.parse_qs(urllib.parse.urlparse(urls[0]).query)
-        self.assertEqual(q["grant_type"], ["fb_exchange_token"])
-        self.assertEqual(q["fb_exchange_token"], ["CURTO"])
-        self.assertIn("access_token=LONGO", urls[1])
-        self.assertIn("input_token=TB", urls[2])
-
-    @mock.patch("urllib.request.urlopen")
-    def test_permissao_faltando_e_sem_paginas(self, urlopen):
-        urlopen.side_effect = [
-            resposta({"access_token": "L"}),
-            resposta({"data": [{"id": "1", "name": "A", "access_token": "TA"}]}),
+            resposta({"data": [{"id": "1", "name": "A", "access_token": "TA"}],
+                      "paging": {"next": "https://graph.facebook.com/v24.0/me/accounts"
+                                         "?after=XYZ&access_token=LONGO"}}),
+            resposta({"data": [{"id": "2", "name": "B", "access_token": "TB"}]}),
+            resposta({"data": {"expires_at": 0, "scopes": self.ESCOPOS}}),
             resposta({"data": {"expires_at": 0, "scopes": ["pages_show_list"]}}),
         ]
-        r = fb_bot.obter_token_de_pagina("APP", "S", "C")
-        self.assertEqual(r["faltando"], ["pages_read_engagement", "pages_manage_posts"])
+        paginas = fb_bot.obter_paginas("APP", "SEGREDO", "CURTO")
+        self.assertEqual([(p["id"], p["nome"], p["token"]) for p in paginas],
+                         [("1", "A", "TA"), ("2", "B", "TB")])
+        self.assertEqual(paginas[0]["faltando"], [])
+        self.assertEqual(paginas[1]["faltando"],
+                         ["pages_read_engagement", "pages_manage_posts"])
+        urls = [c[0][0].full_url for c in urlopen.call_args_list]
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(urls[0]).query)
+        self.assertEqual(q["fb_exchange_token"], ["CURTO"])
+        self.assertIn("access_token=LONGO", urls[1])
+        self.assertIn("after=XYZ", urls[2])
+        self.assertIn("input_token=TA", urls[3])
+        self.assertIn("input_token=TB", urls[4])
 
+    @mock.patch("urllib.request.urlopen")
+    def test_sem_paginas(self, urlopen):
         urlopen.side_effect = [resposta({"access_token": "L"}), resposta({"data": []})]
         with self.assertRaises(fb_bot.ErroFacebook):
-            fb_bot.obter_token_de_pagina("APP", "S", "C")
+            fb_bot.obter_paginas("APP", "S", "C")
+
+    def test_comando_conectar_salva_todas_e_pergunta_a_padrao(self):
+        encontradas = [
+            {"id": "1", "nome": "A", "token": "TA", "expira": 0, "faltando": []},
+            {"id": "2", "nome": "B", "token": "TB", "expira": 0, "faltando": []},
+        ]
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(fb_bot, "ARQUIVO_PAGINAS", Path(d) / "paginas.json"), \
+                mock.patch.object(fb_bot, "carregar_env"), \
+                mock.patch.object(fb_bot, "obter_paginas", return_value=encontradas), \
+                mock.patch("builtins.input", return_value="123"), \
+                mock.patch("getpass.getpass", side_effect=["seg", "tok"]), \
+                mock.patch.dict("os.environ", {}, clear=True), \
+                mock.patch("sys.stdout", new_callable=io.StringIO):
+            rc = fb_bot.comando_conectar(escolher=lambda nomes, pergunta: 1)
+            salvo = json.loads((Path(d) / "paginas.json").read_text())
+            # reconectar mantém a padrão escolhida antes, sem perguntar de novo
+            with mock.patch("getpass.getpass", side_effect=["seg", "tok"]):
+                fb_bot.comando_conectar(escolher=lambda *a: self.fail("não devia perguntar"))
+            salvo2 = json.loads((Path(d) / "paginas.json").read_text())
+        self.assertEqual(rc, 0)
+        self.assertEqual([(p["nome"], p["token"], p["padrao"]) for p in salvo],
+                         [("A", "TA", False), ("B", "TB", True)])
+        self.assertEqual(salvo2, salvo)
 
     def test_salvar_env_preserva_linhas(self):
         with tempfile.TemporaryDirectory() as d:

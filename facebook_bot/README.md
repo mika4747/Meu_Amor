@@ -47,7 +47,8 @@ No menu do app, vá em **Configurações do app → Básico** (*App settings →
 4. Em **Permissions**, adicione: `pages_show_list`, `pages_read_engagement` e
    `pages_manage_posts`.
 5. Clique em **Generate Access Token**. Na janela do Facebook, clique em
-   **Editar acesso** / **Continuar**, **marque a sua Página** e confirme.
+   **Editar acesso** / **Continuar**, **marque todas as Páginas** que o bot vai usar
+   e confirme.
 6. Copie o token que apareceu no campo **Access Token** (um texto longo que começa
    com `EAA...`). Ele vale só ~1 hora, mas o próximo passo resolve isso.
 
@@ -64,16 +65,23 @@ O bot pede o **App ID**, o **App Secret** e o **token** (o que você colar nos d
 últimos não aparece na tela, isso é normal). Ele então:
 
 1. troca o token de 1 hora por um token de longa duração;
-2. pega o **token da Página**, que **não expira**;
-3. se você administra várias Páginas, pergunta qual usar;
-4. grava `FB_PAGE_ID` e `FB_PAGE_ACCESS_TOKEN` no arquivo `facebook_bot/.env`.
+2. pega o **token de cada Página** que você autorizou (esses tokens **não expiram**);
+3. se houver mais de uma Página, pergunta qual será a **Página padrão** (a usada
+   quando o post não diz em qual Página sai);
+4. grava as Páginas e os tokens no arquivo `facebook_bot/paginas.json`.
 
 O App Secret **não** é gravado. Para conferir:
 
 ```bash
 python3 fb_bot.py verificar
-# Conectado à Página: Minha Página (id 1234...)
+# ✅ Meu Amor (id 1234...)
+# ✅ Minha Loja (id 5678...)
+python3 fb_bot.py paginas                    # lista as Páginas conectadas
+python3 fb_bot.py paginas --padrao "Minha Loja"   # muda a Página padrão
 ```
+
+Criou uma Página nova ou esqueceu de marcar alguma? Gere outro token marcando todas e
+rode `conectar` de novo: a Página padrão continua a mesma.
 
 Pronto: o bot está conectado.
 
@@ -101,10 +109,24 @@ de privacidade** em Configurações do app → Básico e mude o app para o modo 
 ### Configurar à mão (opcional)
 
 Se já tiver um token de Página, copie `.env.exemplo` para `.env` e preencha
-`FB_PAGE_ID` e `FB_PAGE_ACCESS_TOKEN`. O `.env` está no `.gitignore`: **nunca** faça
-commit dele. Também dá para usar variáveis de ambiente com esses mesmos nomes.
+`FB_PAGE_ID` e `FB_PAGE_ACCESS_TOKEN` (isso configura uma Página só; se existir um
+`paginas.json`, ele tem prioridade). O `.env` e o `paginas.json` estão no `.gitignore`:
+**nunca** faça commit deles. Também dá para usar variáveis de ambiente com esses mesmos nomes.
 
 ## 2. Usar
+
+### Em qual Página o post sai
+
+Sem dizer nada, o post sai na **Página padrão**. Para escolher:
+
+```bash
+python3 fb_bot.py publicar "Promoção!" --pagina "Minha Loja"
+python3 fb_bot.py publicar "Novidade" --pagina "Meu Amor" --pagina "Minha Loja"
+python3 fb_bot.py publicar "Aviso para todas" --todas
+```
+
+O nome da Página pode ser escrito com maiúsculas ou minúsculas (ou use o id). No
+arquivo de posts, use o campo `"paginas"` (veja a seção de agendamento).
 
 **Publicar agora:**
 
@@ -173,10 +195,14 @@ Cada item do arquivo aceita os campos:
 | `imagens`  | lista de imagens para um post com várias fotos              |
 | `reel`     | vídeo do Reel (arquivo ou URL); não pode ter imagens junto  |
 | `quando`   | data/hora para agendar; sem ele, publica na hora            |
+| `paginas`  | Página(s) onde sai: `"Minha Loja"`, `["Meu Amor", "Minha Loja"]` ou `"todas"`; sem ele, a Página padrão |
 
 Veja exemplos de cada tipo em `posts.exemplo.json`. Caminhos de arquivo podem ser
-relativos à pasta onde você roda o comando ou à pasta `facebook_bot`. Depois de enviado, o bot grava o `id_facebook` no
-próprio arquivo, então rodar de novo não duplica posts: é só acrescentar novos itens.
+relativos à pasta onde você roda o comando ou à pasta `facebook_bot`.
+
+Depois de enviado, o bot anota no campo `enviados` em quais Páginas o post já saiu,
+então rodar de novo não duplica posts: é só acrescentar novos itens. Se uma das
+Páginas der erro, rodar de novo tenta **só** a que faltou.
 
 ## 3. Horários fixos, legendas e hashtags (calendário)
 

@@ -5,11 +5,16 @@ Uso:
     python fb_bot.py publicar "Texto" [--link URL] [--imagem ARQ_OU_URL ...] [--quando DATA]
     python fb_bot.py publicar "Legenda" --reel VIDEO.mp4 [--quando DATA]
     python fb_bot.py agendar posts.json [--calendario calendario.json] [--simular]
-    python fb_bot.py status ID_DO_REEL
-    python fb_bot.py conectar          (configura o token da Página no .env)
+    python fb_bot.py status ID_DO_REEL [--pagina PAGINA]
+    python fb_bot.py conectar          (conecta todas as suas Páginas)
+    python fb_bot.py paginas [--padrao PAGINA]
     python fb_bot.py verificar
 
-Configuração (variáveis de ambiente ou arquivo .env na mesma pasta):
+    Em publicar: --pagina "Nome" (repita para várias) ou --todas.
+    Sem isso, o post sai na Página padrão.
+
+Configuração: o comando "conectar" grava os tokens das Páginas em paginas.json.
+Também dá para configurar uma Página só à mão (variáveis de ambiente ou .env):
     FB_PAGE_ID            ID numérico da Página
     FB_PAGE_ACCESS_TOKEN  Token de acesso da Página (não o token de usuário)
     FB_GRAPH_VERSION      Opcional, padrão "v24.0"
@@ -438,7 +443,7 @@ def _distribuir_horarios(posts: list[dict], calendario: dict,
     livres = proximos_horarios(calendario, ocupados, agora)
     preenchidos, sem_vaga = set(), 0
     for i, post in enumerate(posts):
-        if post.get("id_facebook") or post.get("quando"):
+        if _ja_enviado(post) or post.get("quando"):
             continue
         dt = next(livres, None)
         if dt is None:
@@ -449,26 +454,33 @@ def _distribuir_horarios(posts: list[dict], calendario: dict,
     return preenchidos, sem_vaga
 
 
+def _ja_enviado(post: dict) -> bool:
+    """True se o post já saiu em pelo menos uma Página."""
+    return bool(post.get("id_facebook") or post.get("enviados"))
+
+
 def _salvar(arquivo: Path, posts: list[dict], preenchidos: set[int]) -> None:
     """Grava o arquivo. Horários escolhidos pelo calendário só ficam gravados nos
     posts que foram de fato enviados; os outros ganham um horário novo na próxima vez."""
     copia = []
     for i, post in enumerate(posts):
-        if i in preenchidos and not post.get("id_facebook"):
+        if i in preenchidos and not _ja_enviado(post):
             post = {k: v for k, v in post.items() if k != "quando"}
         copia.append(post)
     arquivo.write_text(json.dumps(copia, ensure_ascii=False, indent=2) + "\n",
                        encoding="utf-8")
 
 
-def agendar_arquivo(cliente: ClienteFacebook | None, arquivo: Path,
+def agendar_arquivo(conta: "Conta | None", arquivo: Path,
                     simular: bool = False, calendario: dict | None = None,
                     agora: datetime | None = None) -> int:
     """Agenda no Facebook todos os posts do arquivo JSON que ainda não foram enviados.
 
-    Com um calendário, posts sem "quando" vão para o próximo horário livre e as
-    hashtags/assinatura do calendário entram na legenda. Cada post enviado ganha o
-    campo "id_facebook" no próprio arquivo, então rodar de novo não duplica nada.
+    Cada post pode dizer em quais Páginas sai (campo "paginas": nome, id, lista ou
+    "todas"); sem ele, sai na Página padrão. Com um calendário, posts sem "quando" vão
+    para o próximo horário livre e as hashtags/assinatura entram na legenda.
+    O bot anota em "enviados" as Páginas onde cada post já saiu, então rodar de novo
+    não duplica nada (e, se uma Página falhar, só ela é tentada de novo).
     Devolve o número de erros.
     """
     posts = json.loads(arquivo.read_text(encoding="utf-8"))
@@ -483,8 +495,19 @@ def agendar_arquivo(cliente: ClienteFacebook | None, arquivo: Path,
     erros = 0
     for i, post in enumerate(posts):
         rotulo = f"[{i + 1}/{len(posts)}]"
-        if post.get("id_facebook"):
+        if post.get("id_facebook"):  # formato antigo: enviado para a Página única
             print(f"{rotulo} já enviado ({post['id_facebook']}), pulando.")
+            continue
+        enviados = dict(post.get("enviados") or {})
+        try:
+            alvos = conta.resolver(post.get("paginas")) if conta else []
+        except ErroFacebook as e:
+            erros += 1
+            print(f"{rotulo} ERRO: {e}", file=sys.stderr)
+            continue
+        faltam = [p for p in alvos if p["id"] not in enviados]
+        if alvos and not faltam:
+            print(f"{rotulo} já enviado em {_nomes(alvos)}, pulando.")
             continue
         if calendario and not post.get("quando"):
             print(f"{rotulo} sem horário livre nos próximos 30 dias; fica para depois.")
@@ -507,27 +530,136 @@ def agendar_arquivo(cliente: ClienteFacebook | None, arquivo: Path,
             resumo = (post.get("mensagem") or post.get("link") or post.get("reel")
                       or (imagens[0] if imagens else ""))[:50]
             acao = f"agendar para {quando:%d/%m/%Y %H:%M}" if quando else "publicar agora"
-            if simular:
-                print(f"{rotulo} (simulação) {acao} [{tipo}]: {resumo!r}")
-                linhas = legenda.splitlines() or [""]
-                print("      legenda: " + linhas[0])
-                for linha in linhas[1:]:
-                    print(f"               {linha}".rstrip())
-                continue
-            assert cliente is not None
-            resp = cliente.publicar(legenda, post.get("link"), imagens,
-                                    post.get("reel"), quando)
-            post["id_facebook"] = _id_do_post(resp)
-            print(f"{rotulo} ok, {acao} [{tipo}]: {resumo!r} -> {post['id_facebook']}")
-            # Salva a cada post para não perder o progresso se algo falhar depois.
-            _salvar(arquivo, posts, preenchidos)
         except (ErroFacebook, KeyError) as e:
             erros += 1
             print(f"{rotulo} ERRO: {e}", file=sys.stderr)
+            continue
+
+        if simular:
+            onde = _nomes(faltam) if faltam else (
+                ", ".join(_como_lista(post.get("paginas"))) or "Página padrão")
+            print(f"{rotulo} (simulação) {acao} [{tipo}] em {onde}: {resumo!r}")
+            linhas = legenda.splitlines() or [""]
+            print("      legenda: " + linhas[0])
+            for linha in linhas[1:]:
+                print(f"               {linha}".rstrip())
+            continue
+
+        for pagina in faltam:
+            try:
+                resp = conta.cliente(pagina).publicar(
+                    legenda, post.get("link"), imagens, post.get("reel"), quando)
+            except ErroFacebook as e:
+                erros += 1
+                print(f"{rotulo} ERRO em {pagina['nome']}: {e}", file=sys.stderr)
+                continue
+            enviados[pagina["id"]] = _id_do_post(resp)
+            post["enviados"] = enviados
+            print(f"{rotulo} ok em {pagina['nome']}, {acao} [{tipo}]: {resumo!r} "
+                  f"-> {enviados[pagina['id']]}")
+            # Salva a cada envio para não perder o progresso se algo falhar depois.
+            _salvar(arquivo, posts, preenchidos)
     if sem_vaga:
         print(f"{sem_vaga} post(s) aguardando vaga: rode o comando de novo nos "
               "próximos dias (o Facebook só agenda até 30 dias à frente).")
     return erros
+
+
+# ---------------------------------------------------------------- Páginas conectadas
+
+ARQUIVO_PAGINAS = PASTA / "paginas.json"
+
+
+def _como_lista(selecao) -> list[str]:
+    if selecao is None or selecao == "":
+        return []
+    if isinstance(selecao, str):
+        return [s.strip() for s in selecao.split(",") if s.strip()]
+    return [str(s).strip() for s in selecao if str(s).strip()]
+
+
+def _nomes(paginas: list[dict]) -> str:
+    return ", ".join(p["nome"] for p in paginas)
+
+
+def _gravar_privado(caminho: Path, texto: str) -> None:
+    caminho.write_text(texto, encoding="utf-8")
+    try:
+        caminho.chmod(0o600)  # só o seu usuário pode ler os tokens
+    except OSError:
+        pass
+
+
+class Conta:
+    """As Páginas conectadas ao bot (com o token de cada uma)."""
+
+    def __init__(self, paginas: list[dict], versao: str = VERSAO_PADRAO, fabrica=None):
+        self.paginas = paginas
+        self.versao = versao
+        # fabrica(pagina) -> cliente; os testes trocam por um cliente falso.
+        self._fabrica = fabrica or (
+            lambda p: ClienteFacebook(p["id"], p["token"], self.versao))
+
+    @classmethod
+    def do_ambiente(cls, caminho: Path | None = None) -> "Conta":
+        """Lê paginas.json (criado pelo comando conectar) ou, se não existir, a
+        Página única do .env (FB_PAGE_ID e FB_PAGE_ACCESS_TOKEN)."""
+        carregar_env()
+        caminho = caminho or ARQUIVO_PAGINAS
+        versao = os.environ.get("FB_GRAPH_VERSION", VERSAO_PADRAO)
+        if caminho.exists():
+            try:
+                paginas = json.loads(caminho.read_text(encoding="utf-8"))
+            except ValueError as e:
+                raise ErroFacebook(f"{caminho} está corrompido: {e}. "
+                                   "Rode 'python3 fb_bot.py conectar' de novo.") from None
+            return cls(paginas, versao)
+        page_id = os.environ.get("FB_PAGE_ID", "")
+        token = os.environ.get("FB_PAGE_ACCESS_TOKEN", "")
+        if page_id and token:
+            return cls([{"id": page_id, "nome": os.environ.get("FB_PAGE_NAME", page_id),
+                         "token": token, "padrao": True}], versao)
+        return cls([], versao)
+
+    def salvar(self, caminho: Path | None = None) -> None:
+        _gravar_privado(caminho or ARQUIVO_PAGINAS,
+                        json.dumps(self.paginas, ensure_ascii=False, indent=2) + "\n")
+
+    def padrao(self) -> dict:
+        if not self.paginas:
+            raise ErroFacebook("Nenhuma Página conectada. Rode: python3 fb_bot.py conectar")
+        return next((p for p in self.paginas if p.get("padrao")), self.paginas[0])
+
+    def definir_padrao(self, selecao: str) -> dict:
+        escolhida = self.resolver(selecao)
+        if len(escolhida) != 1:
+            raise ErroFacebook("Escolha uma Página só para ser a padrão.")
+        for p in self.paginas:
+            p["padrao"] = p["id"] == escolhida[0]["id"]
+        return escolhida[0]
+
+    def resolver(self, selecao=None) -> list[dict]:
+        """Nome(s) ou id(s) de Página -> Páginas. Vazio = padrão; "todas" = todas."""
+        nomes = _como_lista(selecao)
+        if not nomes:
+            return [self.padrao()]
+        if not self.paginas:
+            self.padrao()  # dá o erro de "nenhuma Página conectada"
+        if any(n.lower() == "todas" for n in nomes):
+            return list(self.paginas)
+        escolhidas = []
+        for nome in nomes:
+            achada = next((p for p in self.paginas
+                           if nome == p["id"] or nome.lower() == p["nome"].lower()), None)
+            if achada is None:
+                raise ErroFacebook(f"Página {nome!r} não está conectada. Conectadas: "
+                                   f"{_nomes(self.paginas)}.")
+            if achada not in escolhidas:
+                escolhidas.append(achada)
+        return escolhidas
+
+    def cliente(self, pagina: dict):
+        return self._fabrica(pagina)
 
 
 # ---------------------------------------------------------------- conexão (token)
@@ -552,18 +684,15 @@ def salvar_env(valores: dict, caminho: Path = PASTA / ".env") -> None:
         else:
             novas.append(linha)
     novas += [f"{k}={v}" for k, v in restantes.items()]
-    caminho.write_text("\n".join(novas) + "\n", encoding="utf-8")
-    try:
-        caminho.chmod(0o600)  # só o seu usuário pode ler o token
-    except OSError:
-        pass
+    _gravar_privado(caminho, "\n".join(novas) + "\n")
 
 
-def obter_token_de_pagina(app_id: str, app_secret: str, token_usuario: str,
-                          escolher=None, versao: str = VERSAO_PADRAO) -> dict:
-    """Troca um token de usuário (curto) por um token de Página que não expira.
+def obter_paginas(app_id: str, app_secret: str, token_usuario: str,
+                  versao: str = VERSAO_PADRAO) -> list[dict]:
+    """Troca um token de usuário (curto) pelos tokens de todas as Páginas que a pessoa
+    administra. Esses tokens de Página não expiram.
 
-    Devolve {"id", "name", "access_token", "expira", "faltando"}.
+    Devolve [{"id", "nome", "token", "expira", "faltando"}, ...].
     """
     base = f"https://graph.facebook.com/{versao}"
     # 1) token de usuário curto (~1h) -> token de usuário longo (~60 dias)
@@ -573,49 +702,55 @@ def obter_token_de_pagina(app_id: str, app_secret: str, token_usuario: str,
     })["access_token"]
 
     # 2) a partir do token longo, os tokens de Página não expiram
-    paginas = _get(f"{base}/me/accounts", {
-        "fields": "id,name,access_token,tasks", "limit": 100, "access_token": longo,
-    }).get("data", [])
-    if not paginas:
+    dados: list[dict] = []
+    url, campos = f"{base}/me/accounts", {
+        "fields": "id,name,access_token", "limit": 100, "access_token": longo}
+    while url:  # segue a paginação, para quem administra muitas Páginas
+        resposta = _get(url, campos)
+        dados += resposta.get("data", [])
+        url = resposta.get("paging", {}).get("next")
+        campos = {}  # o link "next" já traz todos os parâmetros
+        if url and "?" in url:
+            url, consulta = url.split("?", 1)
+            campos = dict(urllib.parse.parse_qsl(consulta))
+    if not dados:
         raise ErroFacebook(
-            "Nenhuma Página encontrada. Ao gerar o token, autorize a sua Página e as "
+            "Nenhuma Página encontrada. Ao gerar o token, autorize as suas Páginas e as "
             "permissões " + ", ".join(PERMISSOES_NECESSARIAS) + "."
         )
-    if len(paginas) == 1:
-        pagina = paginas[0]
-    else:
-        pagina = paginas[(escolher or _escolher_no_terminal)([p["name"] for p in paginas])]
 
-    # 3) confere validade e permissões (só para avisar; não bloqueia)
-    resultado = {k: pagina[k] for k in ("id", "name", "access_token")}
-    resultado["expira"], resultado["faltando"] = None, []
-    try:
-        info = _get(f"{base}/debug_token", {
-            "input_token": pagina["access_token"],
-            "access_token": f"{app_id}|{app_secret}",
-        }).get("data", {})
-        resultado["expira"] = info.get("expires_at")
-        escopos = set(info.get("scopes", []))
-        resultado["faltando"] = [p for p in PERMISSOES_NECESSARIAS if p not in escopos]
-    except ErroFacebook:
-        pass
-    return resultado
+    # 3) confere validade e permissões de cada token (só para avisar; não bloqueia)
+    paginas = []
+    for p in dados:
+        pagina = {"id": p["id"], "nome": p["name"], "token": p["access_token"],
+                  "expira": None, "faltando": []}
+        try:
+            info = _get(f"{base}/debug_token", {
+                "input_token": p["access_token"],
+                "access_token": f"{app_id}|{app_secret}",
+            }).get("data", {})
+            pagina["expira"] = info.get("expires_at")
+            escopos = set(info.get("scopes", []))
+            pagina["faltando"] = [x for x in PERMISSOES_NECESSARIAS if x not in escopos]
+        except ErroFacebook:
+            pass
+        paginas.append(pagina)
+    return paginas
 
 
-def _escolher_no_terminal(nomes: list[str]) -> int:
-    print("Você administra mais de uma Página:")
+def _escolher_no_terminal(nomes: list[str], pergunta: str) -> int:
     for i, nome in enumerate(nomes, 1):
         print(f"  {i}) {nome}")
     while True:
-        resp = input("Número da Página que o bot vai usar: ").strip()
+        resp = input(pergunta).strip()
         if resp.isdigit() and 1 <= int(resp) <= len(nomes):
             return int(resp) - 1
         print("Opção inválida.")
 
 
-def comando_conectar() -> int:
+def comando_conectar(escolher=None) -> int:
     carregar_env()
-    print("Conectar o bot à sua Página do Facebook (passo a passo no README).\n")
+    print("Conectar o bot às suas Páginas do Facebook (passo a passo no README).\n")
     app_id = os.environ.get("FB_APP_ID") or input("ID do app (App ID): ").strip()
     app_secret = (os.environ.get("FB_APP_SECRET")
                   or getpass.getpass("Chave secreta do app (App Secret; não aparece "
@@ -625,21 +760,56 @@ def comando_conectar() -> int:
     if not (app_id and app_secret and token):
         raise ErroFacebook("App ID, App Secret e token são obrigatórios.")
 
-    pagina = obter_token_de_pagina(app_id, app_secret, token,
-                                   versao=os.environ.get("FB_GRAPH_VERSION", VERSAO_PADRAO))
-    salvar_env({"FB_PAGE_ID": pagina["id"], "FB_PAGE_ACCESS_TOKEN": pagina["access_token"]})
+    encontradas = obter_paginas(app_id, app_secret, token,
+                                versao=os.environ.get("FB_GRAPH_VERSION", VERSAO_PADRAO))
 
-    print(f"\nPronto! Página conectada: {pagina['name']} (id {pagina['id']})")
-    print(f"Token salvo em {PASTA / '.env'} (não compartilhe esse arquivo).")
-    if pagina["expira"] == 0:
-        print("O token da Página não expira.")
-    elif pagina["expira"]:
-        data = datetime.fromtimestamp(pagina["expira"]).strftime("%d/%m/%Y")
-        print(f"Atenção: este token expira em {data}. Rode 'conectar' de novo antes disso.")
-    if pagina["faltando"]:
-        print("Atenção: faltam as permissões " + ", ".join(pagina["faltando"]) +
-              ". Gere o token de novo marcando essas permissões.")
-        return 1
+    # mantém a Página padrão de antes, se ela continuar na lista
+    anterior = Conta.do_ambiente()
+    padrao_antes = next((p["id"] for p in anterior.paginas if p.get("padrao")), None)
+    ids = [p["id"] for p in encontradas]
+    if padrao_antes in ids:
+        indice = ids.index(padrao_antes)
+    elif len(encontradas) == 1:
+        indice = 0
+    else:
+        print(f"\nVocê administra {len(encontradas)} Páginas. Todas ficam conectadas.")
+        print("Qual é a Página padrão (usada quando o post não diz em qual Página sai)?")
+        indice = (escolher or _escolher_no_terminal)(
+            [p["nome"] for p in encontradas], "Número da Página padrão: ")
+
+    conta = Conta([{"id": p["id"], "nome": p["nome"], "token": p["token"],
+                    "padrao": i == indice} for i, p in enumerate(encontradas)])
+    conta.salvar()
+
+    print(f"\nPronto! {len(encontradas)} Página(s) conectada(s):")
+    problemas = 0
+    for i, p in enumerate(encontradas):
+        marca = "  (padrão)" if i == indice else ""
+        print(f"  • {p['nome']} (id {p['id']}){marca}")
+        if p["expira"]:
+            data = datetime.fromtimestamp(p["expira"]).strftime("%d/%m/%Y")
+            print(f"    Atenção: o token expira em {data}. Rode 'conectar' antes disso.")
+        if p["faltando"]:
+            problemas += 1
+            print("    Atenção: faltam as permissões " + ", ".join(p["faltando"]) +
+                  ". Gere o token de novo marcando essas permissões.")
+    print(f"Tokens salvos em {ARQUIVO_PAGINAS} (não compartilhe esse arquivo).")
+    if not any(p["expira"] for p in encontradas) and not problemas:
+        print("Os tokens das Páginas não expiram.")
+    return 1 if problemas else 0
+
+
+def comando_paginas(conta: Conta, nova_padrao: str | None) -> int:
+    if not conta.paginas:
+        raise ErroFacebook("Nenhuma Página conectada. Rode: python3 fb_bot.py conectar")
+    if nova_padrao:
+        escolhida = conta.definir_padrao(nova_padrao)
+        conta.salvar()
+        print(f"Página padrão agora é: {escolhida['nome']}")
+    padrao = conta.padrao()
+    print("Páginas conectadas:")
+    for p in conta.paginas:
+        print(f"  • {p['nome']} (id {p['id']})" + ("  (padrão)" if p is padrao else ""))
     return 0
 
 
@@ -651,11 +821,13 @@ def main(argv: list[str] | None = None) -> int:
             fluxo.reconfigure(errors="replace")
         except AttributeError:
             pass
-    p = argparse.ArgumentParser(description="Bot de postagem para Página do Facebook.")
+    p = argparse.ArgumentParser(description="Bot de postagem para Páginas do Facebook.")
     sub = p.add_subparsers(dest="comando", required=True)
 
-    sub.add_parser("conectar", help="conecta o bot à sua Página e salva o token no .env")
-    sub.add_parser("verificar", help="testa o token e mostra o nome da Página")
+    sub.add_parser("conectar", help="conecta o bot às suas Páginas e salva os tokens")
+    pg = sub.add_parser("paginas", help="lista as Páginas conectadas")
+    pg.add_argument("--padrao", metavar="PAGINA", help="muda a Página padrão")
+    sub.add_parser("verificar", help="testa o token de cada Página conectada")
 
     pub = sub.add_parser("publicar", help="publica (ou agenda) um post, foto ou Reel")
     pub.add_argument("mensagem", nargs="?", default="", help="texto ou legenda")
@@ -665,6 +837,9 @@ def main(argv: list[str] | None = None) -> int:
     pub.add_argument("--reel", metavar="VIDEO", help="vídeo vertical (arquivo ou URL)")
     pub.add_argument("--hashtags", help='hashtags para a legenda, ex.: "#amor #viagem"')
     pub.add_argument("--quando", help="agendar, ex.: 2026-12-24T20:00")
+    pub.add_argument("--pagina", action="append", metavar="PAGINA",
+                     help="nome ou id da Página (repita para várias); padrão: a Página padrão")
+    pub.add_argument("--todas", action="store_true", help="publica em todas as Páginas")
 
     ag = sub.add_parser("agendar", help="agenda todos os posts de um arquivo JSON")
     ag.add_argument("arquivo", type=Path)
@@ -676,11 +851,15 @@ def main(argv: list[str] | None = None) -> int:
 
     st = sub.add_parser("status", help="mostra a situação de um Reel enviado")
     st.add_argument("video_id")
+    st.add_argument("--pagina", metavar="PAGINA", help="Página do Reel (padrão: a padrão)")
 
     args = p.parse_args(argv)
     try:
         if args.comando == "conectar":
             return comando_conectar()
+        conta = Conta.do_ambiente()
+        if args.comando == "paginas":
+            return comando_paginas(conta, args.padrao)
         if args.comando == "agendar":
             caminho_cal = args.calendario
             if caminho_cal is None and (args.arquivo.parent / "calendario.json").exists():
@@ -688,27 +867,47 @@ def main(argv: list[str] | None = None) -> int:
             calendario = carregar_calendario(caminho_cal) if caminho_cal else None
             if caminho_cal:
                 print(f"Usando o calendário {caminho_cal}")
-            cliente = None if args.simular else ClienteFacebook.do_ambiente()
-            erros = agendar_arquivo(cliente, args.arquivo, args.simular, calendario)
+            if not args.simular:
+                conta.padrao()  # erro claro se nenhuma Página estiver conectada
+            usar = conta if conta.paginas else None
+            erros = agendar_arquivo(usar, args.arquivo, args.simular, calendario)
             return 1 if erros else 0
 
-        cliente = ClienteFacebook.do_ambiente()
         if args.comando == "verificar":
-            info = cliente.verificar()
-            print(f"Conectado à Página: {info.get('name')} (id {info.get('id')})")
-        elif args.comando == "status":
-            print(json.dumps(cliente.status_video(args.video_id).get("status", {}),
-                             ensure_ascii=False, indent=2))
-        else:
-            quando = ler_horario(args.quando) if args.quando else None
-            legenda = montar_legenda(args.mensagem, normalizar_hashtags(args.hashtags))
-            resp = cliente.publicar(legenda, args.link, args.imagem, args.reel, quando)
-            estado = "Agendado" if quando else "Publicado"
-            print(f"{estado}! id: {_id_do_post(resp)}")
+            falhas = 0
+            for pagina in conta.resolver("todas"):
+                try:
+                    info = conta.cliente(pagina).verificar()
+                    print(f"✅ {info.get('name')} (id {info.get('id')})")
+                except ErroFacebook as e:
+                    falhas += 1
+                    print(f"❌ {pagina['nome']}: {e}", file=sys.stderr)
+            return 1 if falhas else 0
+        if args.comando == "status":
+            pagina = conta.resolver(args.pagina)[0]
+            print(json.dumps(conta.cliente(pagina).status_video(args.video_id)
+                             .get("status", {}), ensure_ascii=False, indent=2))
+            return 0
+
+        # publicar
+        alvos = conta.resolver("todas" if args.todas else args.pagina)
+        quando = ler_horario(args.quando) if args.quando else None
+        legenda = montar_legenda(args.mensagem, normalizar_hashtags(args.hashtags))
+        estado = "Agendado" if quando else "Publicado"
+        falhas = 0
+        for pagina in alvos:
+            try:
+                resp = conta.cliente(pagina).publicar(legenda, args.link, args.imagem,
+                                                      args.reel, quando)
+            except ErroFacebook as e:
+                falhas += 1
+                print(f"❌ {pagina['nome']}: {e}", file=sys.stderr)
+                continue
+            print(f"✅ {estado} em {pagina['nome']}! id: {_id_do_post(resp)}")
             if args.reel:
-                print("O Facebook ainda processa o vídeo por alguns minutos. "
-                      f"Acompanhe com: python3 fb_bot.py status {resp['id']}")
-        return 0
+                print("   O Facebook ainda processa o vídeo por alguns minutos. Acompanhe "
+                      f"com: python3 fb_bot.py status {resp['id']} --pagina \"{pagina['nome']}\"")
+        return 1 if falhas else 0
     except ErroFacebook as e:
         print(f"Erro: {e}", file=sys.stderr)
         return 1
