@@ -226,6 +226,13 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="32dp"
                 android:text="Trocar conta / token" />
+
+            <Button
+                android:id="@+id/updateButton"
+                style="@android:style/Widget.Material.Button.Borderless"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Verificar atualização" />
         </LinearLayout>
     </LinearLayout>
 </ScrollView>

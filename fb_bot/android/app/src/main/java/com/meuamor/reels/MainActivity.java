@@ -114,8 +114,13 @@ public class MainActivity extends Activity {
             else { scheduleAt = null; scheduleText.setText(""); }
         });
 
+        Button updateButton = findViewById(R.id.updateButton);
+        updateButton.setText("Verificar atualização (versão " + Updater.currentVersion(this) + ")");
+        updateButton.setOnClickListener(v -> Updater.check(this, true));
+
         loadPages();
         if (pages.isEmpty()) showSetup(); else showMain();
+        if (savedInstanceState == null) Updater.check(this, false);
         handleIntent(getIntent());
     }
 
