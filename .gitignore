@@ -20,3 +20,10 @@ rad.json
 *.flf
 #Test results file
 TestResults.xml
+### fb_bot ###
+.env
+__pycache__/
+*.pyc
+fb_bot/fila/*
+!fb_bot/fila/.gitkeep
+MeuBotReels.apk

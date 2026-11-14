@@ -1,0 +1,39 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.meuamor.reels'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.meuamor.reels'
+        minSdk 24
+        targetSdk 35
+        // No GitHub Actions a versão vem de -PversionCode (número da execução + 100)
+        versionCode((project.findProperty('versionCode') ?: '3') as int)
+        versionName "2.${versionCode}"
+    }
+
+    signingConfigs {
+        // Chave fixa guardada no repositório: toda versão nova instala por cima da anterior.
+        fixa {
+            storeFile rootProject.file('keystore/meubotreels.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.fixa
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
