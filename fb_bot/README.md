@@ -15,6 +15,7 @@ então não coloca sua conta em risco de bloqueio.
 | `posts` / `apagar ID` | lista / apaga posts |
 | `comentarios ID` / `responder ID "msg"` / `ocultar ID` | modera comentários |
 | `fila` | publica automaticamente os vídeos da pasta `fila/` em intervalos |
+| `painel` | abre o painel web para usar pelo celular |
 | `token` | gera um token de longa duração (~60 dias) |
 
 ## 1. Configuração (uma vez só)
@@ -39,6 +40,44 @@ python -m fbbot pages     # pegue o ID da página e coloque em FB_PAGE_ID
 
 > Para usar só nas suas próprias páginas, o app pode ficar em **modo Desenvolvimento**, sem precisar de
 > revisão do Facebook, desde que você seja administrador do app e das páginas.
+
+## 📱 Usar pelo celular (painel web)
+
+```bash
+python -m fbbot painel
+```
+
+Depois abra **http://localhost:8000** no navegador. No painel você escolhe o vídeo da galeria (ou grava na
+hora), escreve a legenda, agenda se quiser e toca em **Publicar Reel**. Também dá para fazer posts de
+texto e acompanhar o status dos últimos Reels.
+
+### Android: rodar no próprio celular (Termux)
+
+1. Instale o **Termux** pelo F-Droid (a versão da Play Store está desatualizada).
+2. No Termux:
+   ```bash
+   pkg install python git
+   termux-setup-storage
+   git clone https://github.com/mika4747/Meu_Amor && cd Meu_Amor/fb_bot
+   pip install -r requirements.txt
+   cp .env.example .env && nano .env      # cole seu token
+   python -m fbbot painel
+   ```
+3. Abra o Chrome em `http://localhost:8000`. Deixe o Termux aberto enquanto o vídeo é enviado.
+
+### iPhone (ou acessar de qualquer lugar)
+
+O iPhone não consegue rodar servidores em segundo plano. Nesse caso, rode o painel num computador ou
+num servidor e acesse pelo navegador do celular:
+
+```bash
+# no .env: PANEL_PASSWORD=uma-senha-forte
+python -m fbbot painel --host 0.0.0.0
+```
+
+- **Na mesma rede Wi-Fi:** abra `http://IP-DO-COMPUTADOR:8000` no celular.
+- **Fora de casa:** hospede num servidor (Render, Railway, uma VPS etc.) e configure as variáveis do
+  `.env` no painel da hospedagem. Use sempre **HTTPS** e uma senha forte.
 
 ## 2. Postar Reels
 

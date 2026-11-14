@@ -86,6 +86,10 @@ def build_parser() -> argparse.ArgumentParser:
     q = sub.add_parser("fila", help="publica Reels da pasta de fila")
     q.add_argument("--uma-vez", action="store_true", help="publica só o próximo e sai (bom para cron)")
     q.add_argument("--intervalo", type=int, help="minutos entre publicações")
+
+    w = sub.add_parser("painel", help="abre o painel web para usar pelo celular")
+    w.add_argument("--host", default="127.0.0.1", help="use 0.0.0.0 para acessar de outro aparelho")
+    w.add_argument("--porta", type=int, default=8000)
     return ap
 
 
@@ -94,6 +98,11 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     cfg = Config.from_env(args.env)
+    if args.cmd == "painel":
+        from .web import run
+        print(f"Painel em http://{'localhost' if args.host == '127.0.0.1' else args.host}:{args.porta}")
+        run(args.host, args.porta)
+        return 0
     try:
         client = GraphClient(cfg.user_token, cfg.api_version)
 
