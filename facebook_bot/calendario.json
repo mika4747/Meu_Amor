@@ -1,0 +1,7 @@
+{
+  "horarios": ["09:00", "12:30", "19:00"],
+  "dias": ["seg", "ter", "qua", "qui", "sex", "sab", "dom"],
+  "fuso": "-03:00",
+  "hashtags": ["#meuamor", "#amor"],
+  "assinatura": "💛 Siga a página para mais!"
+}

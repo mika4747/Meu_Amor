@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Postador Meu Amor</string>
+    <string name="ajuda_conectar">Você precisa ser administrador das Páginas.\n\n1. Crie um app na Meta com o caso de uso \"Gerenciar tudo na sua Página\" e copie o App ID e o App Secret (Configurações do app → Básico).\n\n2. No Graph API Explorer, escolha o seu app, adicione as permissões pages_show_list, pages_read_engagement e pages_manage_posts, toque em Generate Access Token, marque todas as Páginas que o app vai usar e copie o token.\n\n3. Cole tudo abaixo e toque em Conectar. O app conecta todas as Páginas marcadas, cada uma com um token que não expira. O App Secret não fica salvo.</string>
+</resources>

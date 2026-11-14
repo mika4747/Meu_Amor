@@ -1,0 +1,43 @@
+[
+  {
+    "mensagem": "Bom dia! ☀️ Uma ótima semana para todos.",
+    "hashtags": [
+      "#bomdia",
+      "#motivação"
+    ]
+  },
+  {
+    "mensagem": "Novidade por aqui 📸",
+    "imagem": "imagens/foto1.jpg",
+    "hashtags": "#fotografia #novidade",
+    "paginas": "todas"
+  },
+  {
+    "mensagem": "Fotos do nosso fim de semana 💛",
+    "imagens": [
+      "imagens/foto1.jpg",
+      "imagens/foto2.jpg",
+      "imagens/foto3.jpg"
+    ],
+    "hashtags": [
+      "#fimdesemana",
+      "#momentos"
+    ],
+    "paginas": [
+      "Meu Amor",
+      "Minha Loja"
+    ]
+  },
+  {
+    "mensagem": "Bastidores 🎬",
+    "reel": "videos/bastidores.mp4",
+    "hashtags": [
+      "#reels",
+      "#bastidores"
+    ]
+  },
+  {
+    "mensagem": "Este tem horário marcado e não usa os horários do calendário.",
+    "quando": "2026-12-01T20:00-03:00"
+  }
+]
