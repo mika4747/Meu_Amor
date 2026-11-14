@@ -19,6 +19,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Retorno do login do Facebook (via página fb-callback.html) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="meubotreels" android:host="auth" />
+            </intent-filter>
             <!-- Aparece no menu "Compartilhar" da Galeria -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

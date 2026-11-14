@@ -47,7 +47,8 @@ Baixe e instale o **[MeuBotReels.apk](https://github.com/mika4747/Meu_Amor/raw/c
 O Android vai pedir para permitir a instalação de "fontes desconhecidas". O app fala direto com o Facebook,
 sem Termux e sem computador.
 
-1. Abra o app e cole o token, o App ID e o App Secret (os dois últimos fazem o token não expirar).
+1. Abra o app, preencha App ID e App Secret e toque em **Entrar com Facebook**. O passo a passo para
+   criar o app do Facebook está em **[CONECTAR_FACEBOOK.md](CONECTAR_FACEBOOK.md)**.
 2. Escolha a página, toque em **Escolher vídeo**, escreva a legenda e toque em **Publicar Reel**.
    Também dá para agendar e fazer posts de texto.
 3. Atalho: na Galeria, abra um vídeo e toque em **Compartilhar → Meu Bot Reels**.

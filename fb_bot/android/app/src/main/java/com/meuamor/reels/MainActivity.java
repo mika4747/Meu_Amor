@@ -41,17 +41,21 @@ import java.util.concurrent.Executors;
 public class MainActivity extends Activity {
     private static final int REQ_PICK_VIDEO = 1;
     private static final String PREFS = "bot";
+    /** Página (GitHub Pages) que recebe o login do Facebook e devolve para o app. */
+    static final String REDIRECT_URI = "https://mika4747.github.io/Meu_Amor/fb-callback.html";
+    static final String GUIDE_URL = "https://github.com/mika4747/Meu_Amor/blob/ccr-c6110b95-txh3lf/fb_bot/CONECTAR_FACEBOOK.md";
+    static final String SCOPES = "pages_show_list,pages_read_engagement,pages_manage_posts";
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
 
     private LinearLayout setupSection, mainSection;
-    private EditText tokenInput, appIdInput, appSecretInput, captionInput, postInput, linkInput;
+    private EditText tokenInput, appIdInput, appSecretInput, configIdInput, captionInput, postInput, linkInput;
     private Spinner pageSpinner;
     private TextView videoName, statusText, scheduleText;
     private CheckBox scheduleCheck;
-    private Button publishButton, postButton, connectButton;
+    private Button publishButton, postButton, connectButton, loginButton;
     private ProgressBar progress;
 
     private final List<JSONObject> pages = new ArrayList<>();
@@ -69,6 +73,8 @@ public class MainActivity extends Activity {
         tokenInput = findViewById(R.id.tokenInput);
         appIdInput = findViewById(R.id.appIdInput);
         appSecretInput = findViewById(R.id.appSecretInput);
+        configIdInput = findViewById(R.id.configIdInput);
+        loginButton = findViewById(R.id.loginButton);
         captionInput = findViewById(R.id.captionInput);
         postInput = findViewById(R.id.postInput);
         linkInput = findViewById(R.id.linkInput);
@@ -82,14 +88,23 @@ public class MainActivity extends Activity {
         connectButton = findViewById(R.id.connectButton);
         progress = findViewById(R.id.progress);
 
-        connectButton.setOnClickListener(v -> connect());
+        appIdInput.setText(prefs.getString("app_id", ""));
+        appSecretInput.setText(prefs.getString("app_secret", ""));
+        configIdInput.setText(prefs.getString("config_id", ""));
+        loginButton.setOnClickListener(v -> startLogin());
+        findViewById(R.id.helpLink).setOnClickListener(v ->
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(GUIDE_URL))));
+        connectButton.setOnClickListener(v -> {
+            String t = tokenInput.getText().toString().trim();
+            if (t.isEmpty()) toast("Cole o token primeiro"); else connect(t);
+        });
         findViewById(R.id.pickVideoButton).setOnClickListener(v -> pickVideo());
         publishButton.setOnClickListener(v -> publishReel());
         postButton.setOnClickListener(v -> publishPost());
         findViewById(R.id.logoutButton).setOnClickListener(v -> new AlertDialog.Builder(this)
                 .setMessage("Remover o token salvo e conectar outra conta?")
                 .setPositiveButton("Sim", (d, w) -> {
-                    prefs.edit().clear().apply();
+                    prefs.edit().remove("pages").remove("selected").apply();
                     showSetup();
                 })
                 .setNegativeButton("Cancelar", null)
@@ -101,13 +116,13 @@ public class MainActivity extends Activity {
 
         loadPages();
         if (pages.isEmpty()) showSetup(); else showMain();
-        handleShareIntent(getIntent());
+        handleIntent(getIntent());
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        handleShareIntent(intent);
+        handleIntent(intent);
     }
 
     @Override
@@ -152,11 +167,65 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------ conectar
 
-    private void connect() {
-        String token = tokenInput.getText().toString().trim();
+    private void saveAppCredentials() {
+        prefs.edit()
+                .putString("app_id", appIdInput.getText().toString().trim())
+                .putString("app_secret", appSecretInput.getText().toString().trim())
+                .putString("config_id", configIdInput.getText().toString().trim())
+                .apply();
+    }
+
+    /** Abre a tela oficial de login do Facebook no navegador. */
+    private void startLogin() {
+        String appId = appIdInput.getText().toString().trim();
+        if (appId.isEmpty()) {
+            alert("Falta o App ID", "Informe o App ID do seu app do Facebook. Toque em \"Como criar o app\" para ver o passo a passo.");
+            return;
+        }
+        saveAppCredentials();
+        String state = Long.toHexString(new java.security.SecureRandom().nextLong());
+        prefs.edit().putString("oauth_state", state).apply();
+        String configId = configIdInput.getText().toString().trim();
+        Uri.Builder b = Uri.parse("https://www.facebook.com/" + Graph.VERSION + "/dialog/oauth").buildUpon()
+                .appendQueryParameter("client_id", appId)
+                .appendQueryParameter("redirect_uri", REDIRECT_URI)
+                .appendQueryParameter("response_type", "token")
+                .appendQueryParameter("state", state);
+        if (configId.isEmpty()) b.appendQueryParameter("scope", SCOPES);
+        else b.appendQueryParameter("config_id", configId);
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, b.build()));
+        } catch (Exception e) {
+            alert("Erro", "Nenhum navegador encontrado para abrir o login.");
+        }
+    }
+
+    /** Recebe meubotreels://auth?...#access_token=...&state=... */
+    private void handleLoginRedirect(Uri uri) {
+        Uri frag = Uri.parse("x://x?" + (uri.getEncodedFragment() == null ? "" : uri.getEncodedFragment()));
+        String error = firstNonEmpty(uri.getQueryParameter("error_description"), frag.getQueryParameter("error_description"),
+                uri.getQueryParameter("error_reason"), uri.getQueryParameter("error"));
+        if (error != null) { alert("Login cancelado", error); return; }
+        String token = frag.getQueryParameter("access_token");
+        String state = firstNonEmpty(frag.getQueryParameter("state"), uri.getQueryParameter("state"));
+        String expected = prefs.getString("oauth_state", null);
+        if (token == null || token.isEmpty()) { alert("Erro", "O Facebook não devolveu o acesso. Tente de novo."); return; }
+        if (expected == null || !expected.equals(state)) { alert("Erro", "Login inválido (state). Tente de novo."); return; }
+        prefs.edit().remove("oauth_state").apply();
+        connect(token);
+    }
+
+    private static String firstNonEmpty(String... values) {
+        for (String v : values) if (v != null && !v.isEmpty()) return v;
+        return null;
+    }
+
+    private void connect(String token) {
+        saveAppCredentials();
         String appId = appIdInput.getText().toString().trim();
         String secret = appSecretInput.getText().toString().trim();
-        if (token.isEmpty()) { toast("Cole o token primeiro"); return; }
+        loginButton.setEnabled(false);
+        loginButton.setText("Conectando…");
         connectButton.setEnabled(false);
         connectButton.setText("Conectando…");
         worker.execute(() -> {
@@ -188,21 +257,31 @@ public class MainActivity extends Activity {
                 ui.post(() -> {
                     loadPages();
                     tokenInput.setText("");
-                    appSecretInput.setText("");
                     showMain();
                     toast(pages.size() + " página(s) conectada(s) ✅");
                 });
             } catch (Exception e) {
                 ui.post(() -> alert("Não foi possível conectar", e.getMessage()));
             } finally {
-                ui.post(() -> { connectButton.setEnabled(true); connectButton.setText("Conectar"); });
+                ui.post(() -> {
+                    connectButton.setEnabled(true);
+                    connectButton.setText("Conectar com token");
+                    loginButton.setEnabled(true);
+                    loginButton.setText("Entrar com Facebook");
+                });
             }
         });
     }
 
     // ------------------------------------------------------------------ vídeo
 
-    private void handleShareIntent(Intent intent) {
+    private void handleIntent(Intent intent) {
+        if (intent != null && Intent.ACTION_VIEW.equals(intent.getAction()) && intent.getData() != null
+                && "meubotreels".equals(intent.getData().getScheme())) {
+            handleLoginRedirect(intent.getData());
+            setIntent(new Intent());  // não processar de novo ao girar a tela
+            return;
+        }
         if (intent != null && Intent.ACTION_SEND.equals(intent.getAction())) {
             @SuppressWarnings("deprecation")
             Uri uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>Meu Bot Reels</title>
+<style>
+  :root { --bg:#f0f2f5; --card:#fff; --txt:#1c1e21; --muted:#65676b; --brand:#1877f2; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#18191a; --card:#242526; --txt:#e4e6eb; --muted:#b0b3b8; } }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         background:var(--bg); color:var(--txt); font-family:system-ui,-apple-system,sans-serif; padding:16px; box-sizing:border-box; }
+  .card { background:var(--card); border-radius:16px; padding:28px 20px; max-width:380px; width:100%; text-align:center;
+          box-shadow:0 2px 8px rgba(0,0,0,.15); }
+  h1 { font-size:22px; margin:0 0 8px; } p { color:var(--muted); margin:0 0 20px; }
+  a.btn { display:block; background:var(--brand); color:#fff; text-decoration:none; font-weight:700;
+          padding:14px; border-radius:10px; font-size:17px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1 id="t">Conectando…</h1>
+  <p id="m">Voltando para o app Meu Bot Reels.</p>
+  <a class="btn" id="b" href="#">Abrir o app</a>
+</div>
+<script>
+  // O token vem no fragmento (#) e nunca é enviado a nenhum servidor: só é repassado ao app no celular.
+  var q = location.search.replace(/^\?/, ''), h = location.hash.replace(/^#/, '');
+  var target = 'meubotreels://auth' + (q ? '?' + q : '') + (h ? '#' + h : '');
+  document.getElementById('b').href = target;
+  if (/error/.test(q + h)) {
+    document.getElementById('t').textContent = 'Login não concluído';
+    document.getElementById('m').textContent = 'Toque abaixo para voltar ao app e tentar de novo.';
+  } else {
+    document.getElementById('t').textContent = 'Conectado ✅';
+  }
+  history.replaceState(null, '', location.pathname);  // limpa o token da barra de endereço
+  location.replace(target);
+</script>
+</body>
+</html>

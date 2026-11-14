@@ -29,37 +29,71 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="1. Em developers.facebook.com/tools/explorer gere um token com as permissões pages_show_list, pages_read_engagement e pages_manage_posts.\n2. Cole o token abaixo.\n3. Para o token não expirar, preencha também o App ID e o App Secret (Configurações do app → Básico)." />
-
-            <EditText
-                android:id="@+id/tokenInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:hint="Token de acesso"
-                android:inputType="textNoSuggestions|textMultiLine"
-                android:maxLines="4" />
+                android:text="Informe os dados do seu app do Facebook (developers.facebook.com → seu app → Configurações → Básico). Você só faz isso uma vez." />
 
             <EditText
                 android:id="@+id/appIdInput"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:hint="App ID (opcional)"
+                android:layout_marginTop="8dp"
+                android:hint="App ID"
                 android:inputType="number" />
 
             <EditText
                 android:id="@+id/appSecretInput"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:hint="App Secret (opcional)"
+                android:hint="App Secret (para a conexão não expirar)"
                 android:inputType="textPassword" />
+
+            <EditText
+                android:id="@+id/configIdInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Config ID (só se o app for do tipo Empresa)"
+                android:inputType="number" />
+
+            <Button
+                android:id="@+id/loginButton"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="12dp"
+                android:backgroundTint="@color/brand"
+                android:text="Entrar com Facebook"
+                android:textColor="#FFFFFF"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/helpLink"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:padding="8dp"
+                android:text="❓ Como criar o app do Facebook (passo a passo)"
+                android:textColor="@color/brand" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:text="Avançado: colar um token manualmente"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/tokenInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Token de acesso (Graph API Explorer)"
+                android:inputType="textNoSuggestions|textMultiLine"
+                android:maxLines="4" />
 
             <Button
                 android:id="@+id/connectButton"
+                style="@android:style/Widget.Material.Button.Borderless.Colored"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:text="Conectar" />
+                android:text="Conectar com token" />
         </LinearLayout>
 
         <!-- ===================== PRINCIPAL ===================== -->
