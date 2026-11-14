@@ -51,19 +51,28 @@ Depois abra **http://localhost:8000** no navegador. No painel você escolhe o v�
 hora), escreve a legenda, agenda se quiser e toca em **Publicar Reel**. Também dá para fazer posts de
 texto e acompanhar o status dos últimos Reels.
 
-### Android: rodar no próprio celular (Termux)
+### Android: instalação automática (Termux)
 
-1. Instale o **Termux** pelo F-Droid (a versão da Play Store está desatualizada).
-2. No Termux:
+1. Instale o **Termux** pelo **F-Droid** (a versão da Play Store está desatualizada). Se quiser
+   atalhos na tela inicial, instale também o **Termux:Widget**.
+2. Abra o Termux e cole:
    ```bash
-   pkg install python git
-   termux-setup-storage
-   git clone https://github.com/mika4747/Meu_Amor && cd Meu_Amor/fb_bot
-   pip install -r requirements.txt
-   cp .env.example .env && nano .env      # cole seu token
-   python -m fbbot painel
+   pkg install -y git && git clone -b ccr-c6110b95-txh3lf https://github.com/mika4747/Meu_Amor && bash Meu_Amor/fb_bot/termux/instalar.sh
    ```
-3. Abra o Chrome em `http://localhost:8000`. Deixe o Termux aberto enquanto o vídeo é enviado.
+   O instalador pede o token, o App ID e o App Secret, gera o token de 60 dias e pergunta qual página
+   usar como padrão.
+
+Depois disso, há três formas de usar:
+
+- **Compartilhar da Galeria:** abra o vídeo, toque em **Compartilhar → Termux** (escolha
+  *Edit*/*Abrir*), escreva a legenda e escolha entre publicar agora, agendar ou colocar na fila.
+- **Painel:** toque no atalho **Painel do Bot** do widget, ou rode `python -m fbbot painel` dentro de
+  `Meu_Amor/fb_bot`. O navegador abre sozinho em `http://localhost:8000`.
+- **Fila automática:** use o atalho **Fila de Reels**. Ele publica um vídeo da fila a cada X minutos
+  enquanto o Termux estiver aberto. Desative a otimização de bateria do Termux para que o Android não o
+  feche.
+
+Para atualizar o bot depois: `cd ~/Meu_Amor && git pull`.
 
 ### iPhone (ou acessar de qualquer lugar)
 
