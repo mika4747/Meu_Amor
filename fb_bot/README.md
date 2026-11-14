@@ -41,6 +41,19 @@ python -m fbbot pages     # pegue o ID da página e coloque em FB_PAGE_ID
 > Para usar só nas suas próprias páginas, o app pode ficar em **modo Desenvolvimento**, sem precisar de
 > revisão do Facebook, desde que você seja administrador do app e das páginas.
 
+## 📱 App Android (mais fácil)
+
+Baixe e instale o **[MeuBotReels.apk](https://github.com/mika4747/Meu_Amor/raw/ccr-c6110b95-txh3lf/fb_bot/MeuBotReels.apk)**.
+O Android vai pedir para permitir a instalação de "fontes desconhecidas". O app fala direto com o Facebook,
+sem Termux e sem computador.
+
+1. Abra o app e cole o token, o App ID e o App Secret (os dois últimos fazem o token não expirar).
+2. Escolha a página, toque em **Escolher vídeo**, escreva a legenda e toque em **Publicar Reel**.
+   Também dá para agendar e fazer posts de texto.
+3. Atalho: na Galeria, abra um vídeo e toque em **Compartilhar → Meu Bot Reels**.
+
+O código-fonte está em `android/`. Para compilar: `cd android && gradle assembleRelease`.
+
 ## 📱 Usar pelo celular (painel web)
 
 ```bash
