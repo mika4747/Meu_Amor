@@ -51,7 +51,8 @@ public class MainActivity extends Activity {
     private Uri reel;
     // horário escolhido manualmente (segundos Unix)
     private Long horarioEscolhido;
-    private String ultimoReelId;
+    // Reels do último envio: {nome da Página, id do vídeo, token da Página}
+    private final List<String[]> ultimosReels = new ArrayList<>();
     private boolean enviando;
 
     private View painelPostar, painelAgenda, painelConta;
@@ -61,6 +62,7 @@ public class MainActivity extends Activity {
     private EditText edtLegenda, edtHashtagsPost, edtHorarios, edtHashtagsPadrao, edtAssinatura;
     private EditText edtAppId, edtAppSecret, edtToken;
     private RadioGroup rgQuando;
+    private android.widget.LinearLayout listaPaginas;
     private Button btnEnviar, btnStatusReel, btnConectar;
     private ProgressBar progresso;
     private final CheckBox[] dias = new CheckBox[7];
@@ -73,6 +75,7 @@ public class MainActivity extends Activity {
         ligarViews();
         carregarAgenda();
         atualizarCabecalho();
+        montarListaPaginas();
         atualizarMidia();
         atualizarQuando();
         atualizarPrevia();
@@ -113,6 +116,7 @@ public class MainActivity extends Activity {
         edtAppSecret = findViewById(R.id.edtAppSecret);
         edtToken = findViewById(R.id.edtToken);
         rgQuando = findViewById(R.id.rgQuando);
+        listaPaginas = findViewById(R.id.listaPaginas);
         btnEnviar = findViewById(R.id.btnEnviar);
         btnStatusReel = findViewById(R.id.btnStatusReel);
         btnConectar = findViewById(R.id.btnConectar);
@@ -170,10 +174,11 @@ public class MainActivity extends Activity {
         findViewById(R.id.btnVerificar).setOnClickListener(v -> verificar());
         findViewById(R.id.btnDesconectar).setOnClickListener(v ->
                 new AlertDialog.Builder(this)
-                        .setMessage("Desconectar a Página deste celular?")
+                        .setMessage("Desconectar todas as Páginas deste celular?")
                         .setPositiveButton("Desconectar", (d, w) -> {
                             dados.desconectar();
                             atualizarCabecalho();
+                            montarListaPaginas();
                         })
                         .setNegativeButton("Cancelar", null).show());
 
@@ -203,12 +208,16 @@ public class MainActivity extends Activity {
     }
 
     private void atualizarCabecalho() {
-        if (dados.conectado()) {
-            txtPagina.setText("Página: " + dados.pageNome());
-            txtContaStatus.setText("✅ Conectado à Página " + dados.pageNome());
+        JSONArray ps = dados.paginas();
+        if (ps.length() > 0) {
+            List<JSONObject> lista = new ArrayList<>();
+            for (int i = 0; i < ps.length(); i++) lista.add(ps.optJSONObject(i));
+            String todas = nomes(lista);
+            txtPagina.setText((ps.length() == 1 ? "Página: " : ps.length() + " Páginas: ") + todas);
+            txtContaStatus.setText("✅ Conectado a: " + todas);
         } else {
             txtPagina.setText("Nenhuma Página conectada");
-            txtContaStatus.setText("Conectar sua Página do Facebook");
+            txtContaStatus.setText("Conectar suas Páginas do Facebook");
         }
     }
 
@@ -363,13 +372,75 @@ public class MainActivity extends Activity {
         txtPrevia.setText(l.isEmpty() ? "(vazia)" : l);
     }
 
+    // =================================================================== Páginas
+
+    /** Monta uma caixinha por Página conectada na aba Postar. */
+    private void montarListaPaginas() {
+        listaPaginas.removeAllViews();
+        JSONArray ps = dados.paginas();
+        if (ps.length() == 0) {
+            TextView t = new TextView(this);
+            t.setText("Nenhuma Página conectada. Conecte na aba Conta.");
+            t.setTextColor(getColor(R.color.texto_suave));
+            listaPaginas.addView(t);
+            return;
+        }
+        Set<String> marcadas = dados.selecionadas();
+        for (int i = 0; i < ps.length(); i++) {
+            JSONObject p = ps.optJSONObject(i);
+            CheckBox cb = new CheckBox(this);
+            cb.setText(p.optString("nome"));
+            cb.setTag(p.optString("id"));
+            cb.setTextSize(16);
+            cb.setChecked(marcadas.contains(p.optString("id")));
+            cb.setOnCheckedChangeListener((b, marcada) -> {
+                Set<String> s = dados.selecionadas();
+                if (marcada) s.add((String) b.getTag()); else s.remove(b.getTag());
+                dados.salvarSelecionadas(s);
+            });
+            listaPaginas.addView(cb);
+        }
+    }
+
+    /** Páginas marcadas, na ordem em que foram conectadas. */
+    private List<JSONObject> paginasMarcadas() {
+        List<JSONObject> lista = new ArrayList<>();
+        Set<String> marcadas = dados.selecionadas();
+        JSONArray ps = dados.paginas();
+        for (int i = 0; i < ps.length(); i++) {
+            if (marcadas.contains(ps.optJSONObject(i).optString("id"))) {
+                lista.add(ps.optJSONObject(i));
+            }
+        }
+        return lista;
+    }
+
+    private void marcarSomente(Set<String> ids) {
+        dados.salvarSelecionadas(ids);
+        montarListaPaginas();
+    }
+
+    private static String nomes(List<JSONObject> paginas) {
+        StringBuilder sb = new StringBuilder();
+        for (JSONObject p : paginas) {
+            if (sb.length() > 0) sb.append(", ");
+            sb.append(p.optString("nome"));
+        }
+        return sb.toString();
+    }
+
     // =================================================================== enviar
 
     private void enviar() {
         if (enviando) return;
         if (!dados.conectado()) {
-            aviso("Conecte sua Página primeiro, na aba Conta.");
+            aviso("Conecte suas Páginas primeiro, na aba Conta.");
             mostrarAba(2);
+            return;
+        }
+        final List<JSONObject> alvos = paginasMarcadas();
+        if (alvos.isEmpty()) {
+            aviso("Marque pelo menos uma Página em \"Publicar em\".");
             return;
         }
         final String legenda = legendaFinal();
@@ -409,14 +480,27 @@ public class MainActivity extends Activity {
         String quandoTexto = quando == null ? "agora" : formatar(quando);
         new AlertDialog.Builder(this)
                 .setTitle(quando == null ? "Publicar agora?" : "Agendar?")
-                .setMessage(tipo + " • " + quandoTexto + "\n\n" + legenda)
+                .setMessage(tipo + " • " + quandoTexto + "\nEm: " + nomes(alvos)
+                        + "\n\n" + legenda)
                 .setPositiveButton(quando == null ? "Publicar" : "Agendar",
-                        (d, w) -> executarEnvio(tipo, legenda, quando))
+                        (d, w) -> executarEnvio(tipo, legenda, quando, alvos))
                 .setNegativeButton("Voltar", null)
                 .show();
     }
 
-    private void executarEnvio(String tipo, String legenda, Long quando) {
+    /** Resultado do envio para uma Página: id do post ou mensagem de erro. */
+    private static class Resultado {
+        final JSONObject pagina;
+        final String id, erro;
+
+        Resultado(JSONObject pagina, String id, String erro) {
+            this.pagina = pagina;
+            this.id = id;
+            this.erro = erro;
+        }
+    }
+
+    private void executarEnvio(String tipo, String legenda, Long quando, List<JSONObject> alvos) {
         enviando = true;
         btnEnviar.setEnabled(false);
         btnStatusReel.setVisibility(View.GONE);
@@ -426,57 +510,94 @@ public class MainActivity extends Activity {
 
         final List<Uri> minhasFotos = new ArrayList<>(fotos);
         final Uri meuReel = reel;
-        final Graph graph = new Graph(dados.pageId(), dados.pageToken());
-        final Graph.Progresso p = msg -> runOnUiThread(() -> txtResultado.setText(msg));
 
         new Thread(() -> {
-            String id = null;
-            String erro = null;
-            try {
-                if (meuReel != null) {
-                    id = graph.publicarReel(getContentResolver(), meuReel, legenda, quando, p);
-                } else if (minhasFotos.size() > 1) {
-                    id = graph.publicarFotos(getContentResolver(), minhasFotos, legenda, quando, p);
-                } else if (minhasFotos.size() == 1) {
-                    p.mostrar("Enviando foto...");
-                    id = graph.publicarFoto(getContentResolver(), minhasFotos.get(0), legenda,
-                            quando);
-                } else {
-                    id = graph.publicarTexto(legenda, quando);
+            List<Resultado> resultados = new ArrayList<>();
+            for (JSONObject pagina : alvos) {
+                final String prefixo = alvos.size() > 1 ? pagina.optString("nome") + ": " : "";
+                Graph graph = new Graph(pagina.optString("id"), pagina.optString("token"));
+                Graph.Progresso p = msg -> runOnUiThread(() -> txtResultado.setText(prefixo + msg));
+                String id = null, erro = null;
+                try {
+                    if (meuReel != null) {
+                        id = graph.publicarReel(getContentResolver(), meuReel, legenda, quando, p);
+                    } else if (minhasFotos.size() > 1) {
+                        id = graph.publicarFotos(getContentResolver(), minhasFotos, legenda,
+                                quando, p);
+                    } else if (minhasFotos.size() == 1) {
+                        p.mostrar("Enviando foto...");
+                        id = graph.publicarFoto(getContentResolver(), minhasFotos.get(0),
+                                legenda, quando);
+                    } else {
+                        p.mostrar("Enviando...");
+                        id = graph.publicarTexto(legenda, quando);
+                    }
+                } catch (Graph.ErroFacebook e) {
+                    erro = e.getMessage();
+                } catch (RuntimeException e) {
+                    erro = "Erro inesperado: " + e;
                 }
-            } catch (Graph.ErroFacebook e) {
-                erro = e.getMessage();
-            } catch (RuntimeException e) {
-                erro = "Erro inesperado: " + e;
+                resultados.add(new Resultado(pagina, id, erro));
             }
-            final String fId = id;
-            final String fErro = erro;
-            runOnUiThread(() -> terminarEnvio(tipo, legenda, quando, fId, fErro, meuReel != null));
+            runOnUiThread(() -> terminarEnvio(tipo, legenda, quando, resultados, meuReel != null));
         }).start();
     }
 
-    private void terminarEnvio(String tipo, String legenda, Long quando, String id, String erro,
-                               boolean foiReel) {
+    private void terminarEnvio(String tipo, String legenda, Long quando,
+                               List<Resultado> resultados, boolean foiReel) {
         enviando = false;
         btnEnviar.setEnabled(true);
         progresso.setVisibility(View.GONE);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        if (erro != null) {
-            txtResultado.setText("❌ " + erro);
-            new AlertDialog.Builder(this).setTitle("Não deu certo")
-                    .setMessage(erro).setPositiveButton("OK", null).show();
-            return;
-        }
+
         String resumo = legenda.length() > 60 ? legenda.substring(0, 60) + "…" : legenda;
-        dados.registrar(quando == null ? 0 : quando, tipo, resumo.replace('\n', ' '), id);
-        String msg = (quando == null ? "✅ Publicado!" : "✅ Agendado para " + formatar(quando))
-                + "\n" + tipo + " • id " + id;
-        if (foiReel) {
-            ultimoReelId = id;
-            msg += "\n\nO Facebook leva alguns minutos para processar o vídeo.";
+        StringBuilder msg = new StringBuilder();
+        StringBuilder erros = new StringBuilder();
+        Set<String> falharam = new java.util.HashSet<>();
+        if (foiReel) ultimosReels.clear();
+        for (Resultado r : resultados) {
+            String nome = r.pagina.optString("nome");
+            if (r.erro == null) {
+                dados.registrar(quando == null ? 0 : quando, tipo, resumo.replace('\n', ' '),
+                        r.id, nome);
+                msg.append("✅ ").append(nome).append(": ")
+                        .append(quando == null ? "publicado" : "agendado").append("\n");
+                if (foiReel) {
+                    ultimosReels.add(new String[]{nome, r.id, r.pagina.optString("token")});
+                }
+            } else {
+                falharam.add(r.pagina.optString("id"));
+                msg.append("❌ ").append(nome).append(": ").append(r.erro).append("\n");
+                erros.append(nome).append(":\n").append(r.erro).append("\n\n");
+            }
+        }
+        boolean algumOk = falharam.size() < resultados.size();
+        if (quando != null && algumOk) msg.insert(0, "Agendado para " + formatar(quando) + "\n");
+        if (foiReel && algumOk) {
+            msg.append("\nO Facebook leva alguns minutos para processar o vídeo.");
             btnStatusReel.setVisibility(View.VISIBLE);
         }
-        txtResultado.setText(msg);
+        txtResultado.setText(msg.toString().trim());
+
+        if (!falharam.isEmpty()) {
+            if (algumOk) {
+                // Deixa marcadas só as Páginas que falharam e fixa o mesmo horário,
+                // para "tentar de novo" não duplicar nas que já deram certo.
+                marcarSomente(falharam);
+                if (quando != null) {
+                    horarioEscolhido = quando;
+                    rgQuando.check(R.id.rbEscolher);
+                }
+                atualizarQuando();
+                erros.append("Deixei marcadas só as Páginas que falharam: toque no botão de "
+                        + "novo para tentar só nelas.");
+            }
+            new AlertDialog.Builder(this)
+                    .setTitle(algumOk ? "Algumas Páginas falharam" : "Não deu certo")
+                    .setMessage(erros.toString().trim())
+                    .setPositiveButton("OK", null).show();
+            return;
+        }
         Toast.makeText(this, quando == null ? "Publicado!" : "Agendado!", Toast.LENGTH_SHORT).show();
 
         // prepara o próximo post
@@ -490,26 +611,31 @@ public class MainActivity extends Activity {
     }
 
     private void verStatusReel() {
-        if (ultimoReelId == null) return;
-        final Graph graph = new Graph(dados.pageId(), dados.pageToken());
-        final String id = ultimoReelId;
+        if (ultimosReels.isEmpty()) return;
+        final List<String[]> reels = new ArrayList<>(ultimosReels);
         txtResultado.setText("Consultando o Reel...");
         new Thread(() -> {
-            String msg;
-            try {
-                String st = graph.statusVideo(id);
-                switch (st) {
-                    case "ready": msg = "✅ Reel processado e pronto."; break;
-                    case "processing": msg = "⏳ O Facebook ainda está processando o vídeo."; break;
-                    case "upload_complete": msg = "⏳ Vídeo recebido, aguardando processamento."; break;
-                    case "error": msg = "❌ O Facebook recusou o vídeo. Confira se é vertical 9:16 "
-                            + "e tem de 3 a 90 segundos."; break;
-                    default: msg = "Situação do Reel: " + st;
+            StringBuilder sb = new StringBuilder();
+            for (String[] r : reels) {
+                String msg;
+                try {
+                    // o id do vídeo vale para a Graph API com o token da Página dele
+                    String st = new Graph("", r[2]).statusVideo(r[1]);
+                    switch (st) {
+                        case "ready": msg = "✅ processado e pronto."; break;
+                        case "processing": msg = "⏳ o Facebook ainda está processando."; break;
+                        case "upload_complete": msg = "⏳ recebido, aguardando processamento."; break;
+                        case "error": msg = "❌ o Facebook recusou o vídeo. Confira se é vertical "
+                                + "9:16 e tem de 3 a 90 segundos."; break;
+                        default: msg = "situação: " + st;
+                    }
+                } catch (Graph.ErroFacebook e) {
+                    msg = "❌ " + e.getMessage();
                 }
-            } catch (Graph.ErroFacebook e) {
-                msg = "❌ " + e.getMessage();
+                if (sb.length() > 0) sb.append("\n");
+                sb.append(reels.size() > 1 ? r[0] + ": " : "Reel: ").append(msg);
             }
-            final String m = msg;
+            final String m = sb.toString();
             runOnUiThread(() -> txtResultado.setText(m));
         }).start();
     }
@@ -590,6 +716,8 @@ public class MainActivity extends Activity {
             String situacao = q == 0 ? "publicado " + formatar(item.optLong("enviado"))
                     : (q > agora ? "⏰ agendado " : "✅ saiu ") + formatar(q);
             if (sb.length() > 0) sb.append("\n\n");
+            String pagina = item.optString("pagina", "");
+            if (!pagina.isEmpty()) sb.append(pagina).append(" • ");
             sb.append(item.optString("tipo")).append(" • ").append(situacao)
                     .append("\n").append(item.optString("resumo"));
         }
@@ -613,7 +741,7 @@ public class MainActivity extends Activity {
             try {
                 String longo = Graph.tokenLongo(appId, secret, token);
                 JSONArray paginas = Graph.paginas(longo);
-                runOnUiThread(() -> escolherPagina(paginas, appId, secret));
+                runOnUiThread(() -> finalizarConexao(paginas, appId, secret));
             } catch (Graph.ErroFacebook e) {
                 runOnUiThread(() -> {
                     btnConectar.setEnabled(true);
@@ -623,67 +751,72 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void escolherPagina(JSONArray paginas, String appId, String secret) {
-        if (paginas.length() == 0) {
+    /** Guarda todas as Páginas autorizadas (cada uma com seu token) e confere os tokens. */
+    private void finalizarConexao(JSONArray encontradas, String appId, String secret) {
+        if (encontradas.length() == 0) {
             btnConectar.setEnabled(true);
             txtContaResultado.setText("❌ Nenhuma Página encontrada. Gere o token de novo e, na "
-                    + "janela do Facebook, marque a sua Página e as 3 permissões.");
+                    + "janela do Facebook, marque as suas Páginas e as 3 permissões.");
             return;
         }
-        if (paginas.length() == 1) {
-            finalizarConexao(paginas.optJSONObject(0), appId, secret);
-            return;
+        final JSONArray paginas = new JSONArray();
+        for (int i = 0; i < encontradas.length(); i++) {
+            JSONObject e = encontradas.optJSONObject(i);
+            try {
+                JSONObject p = new JSONObject();
+                p.put("id", e.optString("id"));
+                p.put("nome", e.optString("name"));
+                p.put("token", e.optString("access_token"));
+                paginas.put(p);
+            } catch (org.json.JSONException ignorado) {
+            }
         }
-        String[] nomes = new String[paginas.length()];
-        for (int i = 0; i < nomes.length; i++) nomes[i] = paginas.optJSONObject(i).optString("name");
-        new AlertDialog.Builder(this)
-                .setTitle("Qual Página o app vai usar?")
-                .setItems(nomes, (d, i) -> finalizarConexao(paginas.optJSONObject(i), appId, secret))
-                .setOnCancelListener(d -> {
-                    btnConectar.setEnabled(true);
-                    txtContaResultado.setText("Conexão cancelada.");
-                })
-                .show();
-    }
-
-    private void finalizarConexao(JSONObject pagina, String appId, String secret) {
-        final String id = pagina.optString("id");
-        final String nome = pagina.optString("name");
-        final String tokenPagina = pagina.optString("access_token");
-        dados.salvarPagina(id, nome, tokenPagina);
+        dados.salvarPaginas(paginas);
         edtAppSecret.setText("");
         edtToken.setText("");
         atualizarCabecalho();
-        txtContaResultado.setText("✅ Conectado à Página " + nome + ". Conferindo o token...");
+        montarListaPaginas();
+        txtContaResultado.setText("✅ " + paginas.length() + " Página(s) conectada(s). "
+                + "Conferindo os tokens...");
         new Thread(() -> {
-            String extra;
-            try {
-                JSONObject info = Graph.depurarToken(tokenPagina, appId, secret);
-                long expira = info.optLong("expires_at", -1);
-                JSONArray escopos = info.optJSONArray("scopes");
-                List<String> faltando = new ArrayList<>();
-                for (String perm : Graph.PERMISSOES) {
-                    boolean tem = false;
-                    for (int i = 0; escopos != null && i < escopos.length(); i++) {
-                        if (perm.equals(escopos.optString(i))) tem = true;
+            StringBuilder sb = new StringBuilder();
+            boolean algumExpira = false;
+            for (int i = 0; i < paginas.length(); i++) {
+                JSONObject p = paginas.optJSONObject(i);
+                sb.append("\n• ").append(p.optString("nome"));
+                try {
+                    JSONObject info = Graph.depurarToken(p.optString("token"), appId, secret);
+                    long expira = info.optLong("expires_at", -1);
+                    JSONArray escopos = info.optJSONArray("scopes");
+                    List<String> faltando = new ArrayList<>();
+                    for (String perm : Graph.PERMISSOES) {
+                        boolean tem = false;
+                        for (int j = 0; escopos != null && j < escopos.length(); j++) {
+                            if (perm.equals(escopos.optString(j))) tem = true;
+                        }
+                        if (!tem) faltando.add(perm);
                     }
-                    if (!tem) faltando.add(perm);
+                    if (expira > 0) {
+                        algumExpira = true;
+                        sb.append("\n   ⚠️ o token expira em ").append(formatar(expira))
+                                .append(". Conecte de novo antes disso.");
+                    }
+                    if (!faltando.isEmpty()) {
+                        sb.append("\n   ⚠️ faltam as permissões: ").append(String.join(", ", faltando))
+                                .append(". Gere o token de novo marcando essas permissões.");
+                    }
+                } catch (Graph.ErroFacebook e) {
+                    sb.append("\n   (não foi possível conferir o token: ").append(e.getMessage())
+                            .append(")");
                 }
-                extra = expira == 0 ? "O token da Página não expira." : expira > 0
-                        ? "Atenção: o token expira em " + formatar(expira)
-                        + ". Conecte de novo antes disso." : "";
-                if (!faltando.isEmpty()) {
-                    extra += "\n\n⚠️ Faltam as permissões: " + String.join(", ", faltando)
-                            + ". Gere o token de novo marcando essas permissões.";
-                }
-            } catch (Graph.ErroFacebook e) {
-                extra = "(Não foi possível conferir a validade do token: " + e.getMessage() + ")";
             }
-            final String fExtra = extra;
+            final String lista = sb.toString();
+            final boolean expira = algumExpira;
             runOnUiThread(() -> {
                 btnConectar.setEnabled(true);
-                txtContaResultado.setText("✅ Conectado à Página " + nome + ".\n" + fExtra);
-                Toast.makeText(this, "Página conectada!", Toast.LENGTH_SHORT).show();
+                txtContaResultado.setText("✅ " + paginas.length() + " Página(s) conectada(s):"
+                        + lista + (expira ? "" : "\n\nOs tokens das Páginas não expiram."));
+                Toast.makeText(this, "Páginas conectadas!", Toast.LENGTH_SHORT).show();
             });
         }).start();
     }
@@ -693,17 +826,21 @@ public class MainActivity extends Activity {
             aviso("Nenhuma Página conectada.");
             return;
         }
-        final Graph graph = new Graph(dados.pageId(), dados.pageToken());
+        final JSONArray paginas = dados.paginas();
         txtContaResultado.setText("Testando...");
         new Thread(() -> {
-            String msg;
-            try {
-                JSONObject r = graph.verificar();
-                msg = "✅ Funcionando: " + r.optString("name") + " (id " + r.optString("id") + ")";
-            } catch (Graph.ErroFacebook e) {
-                msg = "❌ " + e.getMessage();
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < paginas.length(); i++) {
+                JSONObject p = paginas.optJSONObject(i);
+                if (sb.length() > 0) sb.append("\n");
+                try {
+                    new Graph(p.optString("id"), p.optString("token")).verificar();
+                    sb.append("✅ ").append(p.optString("nome")).append(": funcionando");
+                } catch (Graph.ErroFacebook e) {
+                    sb.append("❌ ").append(p.optString("nome")).append(": ").append(e.getMessage());
+                }
             }
-            final String m = msg;
+            final String m = sb.toString();
             runOnUiThread(() -> txtContaResultado.setText(m));
         }).start();
     }

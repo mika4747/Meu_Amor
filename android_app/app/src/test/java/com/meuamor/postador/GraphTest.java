@@ -37,105 +37,25 @@ import static org.robolectric.Shadows.shadowOf;
 @RunWith(RobolectricTestRunner.class)
 public class GraphTest {
 
-    /** Uma requisição recebida pelo servidor falso. */
-    static class Pedido {
-        String metodo, caminho, query, tipo;
-        Map<String, String> cabecalhos = new HashMap<>();
-        byte[] corpo;
-
-        Map<String, String> form() {
-            Map<String, String> m = new HashMap<>();
-            String texto = new String(corpo, StandardCharsets.UTF_8);
-            for (String par : texto.split("&")) {
-                if (par.isEmpty()) continue;
-                String[] kv = par.split("=", 2);
-                try {
-                    m.put(URLDecoder.decode(kv[0], "UTF-8"),
-                            kv.length > 1 ? URLDecoder.decode(kv[1], "UTF-8") : "");
-                } catch (java.io.UnsupportedEncodingException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-            return m;
-        }
-
-        String corpoTexto() { return new String(corpo, StandardCharsets.ISO_8859_1); }
-    }
-
-    private ServerSocket servidor;
-    private Thread atendente;
-    private final List<Pedido> pedidos = new ArrayList<>();
-    private final LinkedList<String[]> respostas = new LinkedList<>(); // {status, json}
+    private ServidorFalso srv;
+    private List<ServidorFalso.Pedido> pedidos;
+    private LinkedList<String[]> respostas;
     private String base;
 
     @Before
     public void iniciar() throws Exception {
-        servidor = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"));
-        base = "http://127.0.0.1:" + servidor.getLocalPort() + "/";
-        Graph.BASE = base;
-        atendente = new Thread(() -> {
-            while (!servidor.isClosed()) {
-                try (Socket s = servidor.accept()) {
-                    atender(s);
-                } catch (Exception ignorado) {
-                    // servidor fechado no fim do teste
-                }
-            }
-        });
-        atendente.start();
-    }
-
-    /** Servidor HTTP/1.1 mínimo: lê uma requisição e responde com o próximo JSON. */
-    private void atender(Socket s) throws Exception {
-        InputStream in = s.getInputStream();
-        String linha = lerLinha(in);
-        Pedido p = new Pedido();
-        String[] partes = linha.split(" ");
-        p.metodo = partes[0];
-        String alvo = partes[1];
-        int q = alvo.indexOf('?');
-        p.caminho = q < 0 ? alvo : alvo.substring(0, q);
-        p.query = q < 0 ? null : alvo.substring(q + 1);
-        for (String h = lerLinha(in); !h.isEmpty(); h = lerLinha(in)) {
-            int i = h.indexOf(':');
-            p.cabecalhos.put(h.substring(0, i).trim().toLowerCase(), h.substring(i + 1).trim());
-        }
-        int tamanho = Integer.parseInt(p.cabecalhos.getOrDefault("content-length", "0"));
-        p.corpo = new byte[tamanho];
-        int lidos = 0;
-        while (lidos < tamanho) {
-            int n = in.read(p.corpo, lidos, tamanho - lidos);
-            if (n < 0) break;
-            lidos += n;
-        }
-        String[] r;
-        synchronized (pedidos) {
-            pedidos.add(p);
-            r = respostas.isEmpty() ? new String[]{"200", "{}"} : respostas.removeFirst();
-        }
-        byte[] json = r[1].replace("$BASE", base).getBytes(StandardCharsets.UTF_8);
-        OutputStream out = s.getOutputStream();
-        out.write(("HTTP/1.1 " + r[0] + " X\r\nContent-Type: application/json\r\n"
-                + "Content-Length: " + json.length + "\r\nConnection: close\r\n\r\n")
-                .getBytes(StandardCharsets.UTF_8));
-        out.write(json);
-        out.flush();
-    }
-
-    private static String lerLinha(InputStream in) throws Exception {
-        ByteArrayOutputStream b = new ByteArrayOutputStream();
-        int c;
-        while ((c = in.read()) >= 0 && c != '\n') if (c != '\r') b.write(c);
-        return b.toString("UTF-8");
+        srv = new ServidorFalso();
+        pedidos = srv.pedidos;
+        respostas = srv.respostas;
+        base = srv.base;
     }
 
     @After
     public void parar() throws Exception {
-        servidor.close();
-        atendente.join(2000);
+        srv.parar();
     }
 
-    private void responder(String json) { respostas.add(new String[]{"200", json}); }
+    private void responder(String json) { srv.responder(json); }
 
     private Uri arquivo(String nome, byte[] dados) {
         Uri uri = Uri.parse("content://teste/" + nome);
@@ -153,7 +73,7 @@ public class GraphTest {
         responder("{\"id\":\"111_222\"}");
         String id = new Graph("111", "TOKEN").publicarTexto("Olá ❤️", 1_900_000_000L);
         assertEquals("111_222", id);
-        Pedido p = pedidos.get(0);
+        ServidorFalso.Pedido p = pedidos.get(0);
         assertEquals("POST", p.metodo);
         assertEquals("/111/feed", p.caminho);
         Map<String, String> f = p.form();
@@ -169,7 +89,7 @@ public class GraphTest {
         byte[] img = {(byte) 0x89, 'P', 'N', 'G', 1, 2, 3};
         String id = new Graph("111", "T").publicarFoto(cr(), arquivo("a.png", img), "Legenda", null);
         assertEquals("111_9", id);
-        Pedido p = pedidos.get(0);
+        ServidorFalso.Pedido p = pedidos.get(0);
         assertEquals("/111/photos", p.caminho);
         assertTrue(p.cabecalhos.get("content-type").startsWith("multipart/form-data; boundary="));
         String corpo = p.corpoTexto();
@@ -211,7 +131,7 @@ public class GraphTest {
         assertEquals("v1", id);
 
         assertEquals("start", pedidos.get(0).form().get("upload_phase"));
-        Pedido envio = pedidos.get(1);
+        ServidorFalso.Pedido envio = pedidos.get(1);
         assertEquals("/upload/v1", envio.caminho);
         assertEquals("OAuth TOK", envio.cabecalhos.get("authorization"));
         assertEquals("0", envio.cabecalhos.get("offset"));

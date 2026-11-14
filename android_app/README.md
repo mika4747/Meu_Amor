@@ -1,7 +1,7 @@
 # Postador Meu Amor (app Android)
 
-App para o celular que publica e agenda **fotos**, **Reels** e posts de texto na sua
-**Página do Facebook**, com **horários fixos**, **legendas** e **hashtags**. Faz o mesmo que
+App para o celular que publica e agenda **fotos**, **Reels** e posts de texto nas suas
+**Páginas do Facebook** (uma ou várias), com **horários fixos**, **legendas** e **hashtags**. Faz o mesmo que
 o bot em Python (`facebook_bot/`), mas direto no celular.
 
 - Android 8.0 ou mais novo.
@@ -29,11 +29,12 @@ O passo a passo também aparece dentro do app:
    (Configurações do app → Básico).
 2. Toque em **Abrir o Graph API Explorer**, escolha o seu app, adicione as permissões
    `pages_show_list`, `pages_read_engagement` e `pages_manage_posts`, toque em
-   **Generate Access Token**, marque a sua Página e copie o token.
+   **Generate Access Token**, marque **todas as Páginas** que o app vai usar e copie o token.
 3. Cole o App ID, o App Secret e o token no app e toque em **Conectar**.
 
-O app troca o token por um **token da Página que não expira** e avisa se faltar
-alguma permissão. O App Secret não fica salvo.
+O app conecta **todas as Páginas marcadas**, cada uma com um token que **não expira**,
+e avisa se faltar alguma permissão. O App Secret não fica salvo. Para incluir uma
+Página nova depois, gere outro token marcando todas e toque em **Conectar** de novo.
 
 > Dica: o site da Meta funciona melhor no modo "Versão para computador" do navegador.
 
@@ -47,15 +48,19 @@ Mostra também os próximos horários livres e o histórico do que foi enviado.
 
 ### Aba Postar
 
-1. Toque em **📷 Fotos** (uma ou várias, que saem juntas num post) ou **🎬 Reel**
+1. Em **Publicar em**, marque em quais Páginas o post sai (o app lembra a escolha).
+2. Toque em **📷 Fotos** (uma ou várias, que saem juntas num post) ou **🎬 Reel**
    (vídeo vertical 9:16, de 3 a 90 segundos). Sem mídia, o post é só de texto.
-2. Escreva a **legenda** e, se quiser, **hashtags só deste post**.
-3. Escolha **quando**:
+3. Escreva a **legenda** e, se quiser, **hashtags só deste post**.
+4. Escolha **quando**:
    - **No próximo horário livre** (dos horários que você definiu);
    - **Escolher dia e hora**;
    - **Agora**.
-4. Confira a **prévia da legenda** (texto + assinatura + hashtags) e toque em
+5. Confira a **prévia da legenda** (texto + assinatura + hashtags) e toque em
    **Agendar** / **Publicar agora**.
+
+Se alguma Página der erro, o app deixa marcadas **só as que falharam**, com o mesmo
+horário: é só tocar no botão de novo para tentar nelas, sem duplicar nas outras.
 
 Também dá para abrir a **galeria**, selecionar fotos ou um vídeo e tocar em
 **Compartilhar → Postador Meu Amor**.

@@ -23,18 +23,51 @@ public class Dados {
 
     // ------------------------------------------------------------ Página conectada
 
-    public String pageId() { return prefs.getString("page_id", ""); }
-    public String pageToken() { return prefs.getString("page_token", ""); }
-    public String pageNome() { return prefs.getString("page_nome", ""); }
-    public boolean conectado() { return !pageId().isEmpty() && !pageToken().isEmpty(); }
+    /** Páginas conectadas: [{"id", "nome", "token"}, ...]. */
+    public JSONArray paginas() {
+        try {
+            JSONArray lista = new JSONArray(prefs.getString("paginas", "[]"));
+            if (lista.length() == 0 && !prefs.getString("page_id", "").isEmpty()) {
+                // versão 1.0 do app guardava uma Página só
+                JSONObject p = new JSONObject();
+                p.put("id", prefs.getString("page_id", ""));
+                p.put("nome", prefs.getString("page_nome", ""));
+                p.put("token", prefs.getString("page_token", ""));
+                lista.put(p);
+            }
+            return lista;
+        } catch (JSONException e) {
+            return new JSONArray();
+        }
+    }
 
-    public void salvarPagina(String id, String nome, String token) {
-        prefs.edit().putString("page_id", id).putString("page_nome", nome)
-                .putString("page_token", token).apply();
+    public boolean conectado() { return paginas().length() > 0; }
+
+    public void salvarPaginas(JSONArray paginas) {
+        prefs.edit().putString("paginas", paginas.toString())
+                .remove("page_id").remove("page_nome").remove("page_token")
+                .remove("selecionadas").apply();
+    }
+
+    /** Ids das Páginas marcadas para postar (todas, se nunca foi escolhido). */
+    public Set<String> selecionadas() {
+        Set<String> salvas = prefs.getStringSet("selecionadas", null);
+        Set<String> ids = new HashSet<>();
+        JSONArray ps = paginas();
+        for (int i = 0; i < ps.length(); i++) {
+            String id = ps.optJSONObject(i).optString("id");
+            if (salvas == null || salvas.contains(id)) ids.add(id);
+        }
+        return ids;
+    }
+
+    public void salvarSelecionadas(Set<String> ids) {
+        prefs.edit().putStringSet("selecionadas", new HashSet<>(ids)).apply();
     }
 
     public void desconectar() {
-        prefs.edit().remove("page_id").remove("page_nome").remove("page_token").apply();
+        prefs.edit().remove("paginas").remove("selecionadas").remove("page_id")
+                .remove("page_nome").remove("page_token").apply();
     }
 
     public String appId() { return prefs.getString("app_id", ""); }
@@ -72,10 +105,11 @@ public class Dados {
     }
 
     /** quando = segundos Unix do agendamento, ou 0 se foi publicado na hora. */
-    public void registrar(long quando, String tipo, String resumo, String id) {
+    public void registrar(long quando, String tipo, String resumo, String id, String pagina) {
         JSONArray h = historico();
         try {
             JSONObject item = new JSONObject();
+            item.put("pagina", pagina);
             item.put("quando", quando);
             item.put("enviado", System.currentTimeMillis() / 1000);
             item.put("tipo", tipo);

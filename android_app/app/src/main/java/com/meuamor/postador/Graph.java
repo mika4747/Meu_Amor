@@ -69,8 +69,17 @@ public class Graph {
         p.put("fields", "id,name,access_token");
         p.put("limit", "100");
         p.put("access_token", tokenUsuario);
-        JSONArray dados = get("me/accounts", p).optJSONArray("data");
-        return dados == null ? new JSONArray() : dados;
+        JSONArray todas = new JSONArray();
+        JSONObject r = get("me/accounts", p);
+        for (int voltas = 0; voltas < 50; voltas++) { // segue a paginação da API
+            JSONArray dados = r.optJSONArray("data");
+            for (int i = 0; dados != null && i < dados.length(); i++) todas.put(dados.opt(i));
+            JSONObject paging = r.optJSONObject("paging");
+            String proxima = paging == null ? "" : paging.optString("next", "");
+            if (proxima.isEmpty()) break;
+            r = getUrl(proxima);
+        }
+        return todas;
     }
 
     /** Informações do token (expires_at, scopes). */
@@ -278,6 +287,17 @@ public class Graph {
         try {
             HttpURLConnection c = (HttpURLConnection)
                     new URL(BASE + caminho + "?" + codificar(campos)).openConnection();
+            c.setConnectTimeout(30000);
+            c.setReadTimeout(60000);
+            return resposta(c);
+        } catch (IOException e) {
+            throw semConexao(e);
+        }
+    }
+
+    static JSONObject getUrl(String url) throws ErroFacebook {
+        try {
+            HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
             c.setConnectTimeout(30000);
             c.setReadTimeout(60000);
             return resposta(c);
